@@ -1,0 +1,20 @@
+# Everything stays LF, in the repository and in the working tree.
+#
+# Murmur is built and tested in Linux containers from a Windows checkout. A
+# CRLF Makefile or .sh breaks the moment it is mounted into one, and a CRLF
+# .go file is not gofmt-clean, so autocrlf must not get a vote here.
+* text=auto eol=lf
+
+*.go     text eol=lf
+*.sql    text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.md     text eol=lf
+*.html   text eol=lf
+*.proto  text eol=lf
+Makefile text eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary

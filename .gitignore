@@ -1,0 +1,15 @@
+# build output
+/bin/
+*.exe
+*.test
+
+# local environment
+.env
+.env.local
+
+# tooling
+coverage.out
+*.prof
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,1244 @@
+<title>Murmur Build Spec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<style>
+  :root {
+    --ground: #F1F5F7;
+    --surface: #FFFFFF;
+    --surface-2: #E7EEF1;
+    --ink: #15202B;
+    --ink-2: #33475A;
+    --muted: #5E7183;
+    --line: #D5DFE6;
+    --line-strong: #B9C8D2;
+    --accent: #0B6E7F;
+    --accent-soft: #DDEFF2;
+    --signal: #B94E24;
+    --signal-soft: #FAE8E0;
+    --ok: #2C7A58;
+    --ok-soft: #DFF0E7;
+    --warn: #8E6310;
+    --shadow: 0 1px 2px rgba(21,32,43,.06), 0 8px 24px -16px rgba(21,32,43,.28);
+
+    --f-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --f-serif: "IBM Plex Serif", ui-serif, Georgia, "Times New Roman", serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0C1319;
+      --surface: #131C24;
+      --surface-2: #1A242E;
+      --ink: #E3EBF1;
+      --ink-2: #B5C6D3;
+      --muted: #89A0B0;
+      --line: #24323E;
+      --line-strong: #35485A;
+      --accent: #49BFCE;
+      --accent-soft: #0E3038;
+      --signal: #E8875D;
+      --signal-soft: #331E15;
+      --ok: #58BC8E;
+      --ok-soft: #123024;
+      --warn: #D2A24B;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0C1319;
+    --surface: #131C24;
+    --surface-2: #1A242E;
+    --ink: #E3EBF1;
+    --ink-2: #B5C6D3;
+    --muted: #89A0B0;
+    --line: #24323E;
+    --line-strong: #35485A;
+    --accent: #49BFCE;
+    --accent-soft: #0E3038;
+    --signal: #E8875D;
+    --signal-soft: #331E15;
+    --ok: #58BC8E;
+    --ok-soft: #123024;
+    --warn: #D2A24B;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    max-width: 1220px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 0 72px;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead { padding-block: 44px 28px; border-bottom: 1px solid var(--line); }
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+  .masthead h1 {
+    font-size: clamp(38px, 7vw, 62px);
+    line-height: 1.02;
+    letter-spacing: -.025em;
+    font-weight: 700;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .masthead .deck {
+    font-family: var(--f-serif);
+    font-size: clamp(16px, 2.3vw, 19px);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 62ch;
+    margin: 16px 0 0;
+  }
+  .factbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    margin-top: 28px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .fact {
+    flex: 1 1 165px;
+    padding: 13px 16px;
+    border-right: 1px solid var(--line);
+  }
+  .fact:last-child { border-right: 0; }
+  .fact dt {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 4px;
+  }
+  .fact dd { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+
+  /* ---------- layout ---------- */
+  .layout { display: block; }
+  @media (min-width: 1040px) {
+    .layout {
+      display: grid;
+      grid-template-columns: 216px minmax(0, 1fr);
+      gap: 48px;
+      align-items: start;
+    }
+  }
+
+  /* ---------- rail ---------- */
+  .rail { padding-block: 32px 0; }
+  @media (min-width: 1040px) {
+    .rail {
+      position: sticky;
+      top: calc(env(safe-area-inset-top, 0px) + 28px);
+      max-height: calc(100vh - 80px);
+      overflow-y: auto;
+    }
+  }
+  .rail-title {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+  .rail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  @media (min-width: 1040px) { .rail-list { display: block; } }
+  .rail-list a {
+    display: flex;
+    gap: 9px;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--ink-2);
+    font-size: 13px;
+    padding: 5px 9px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+  }
+  @media (min-width: 1040px) {
+    .rail-list a { border: 0; background: none; padding: 5px 0 5px 10px; border-left: 2px solid var(--line); border-radius: 0; }
+  }
+  .rail-list a:hover { color: var(--accent); border-color: var(--accent); }
+  .rail-list a .n { font-family: var(--f-mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .rail-list li.rail-done a .n { color: var(--ok); }
+  .rail-list li.rail-done a { text-decoration: line-through; text-decoration-color: var(--line-strong); }
+  .rail-progress {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .bar { height: 4px; background: var(--surface-2); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0%; background: var(--ok); transition: width .25s ease; }
+
+  /* ---------- sections ---------- */
+  main { padding-block: 32px 0; min-width: 0; }
+  section { scroll-margin-top: 24px; }
+  .sec { padding-block: 40px; border-top: 1px solid var(--line); }
+  .sec:first-child { border-top: 0; padding-top: 8px; }
+  h2 {
+    font-size: 25px;
+    letter-spacing: -.02em;
+    font-weight: 650;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -.005em;
+    margin: 26px 0 10px;
+  }
+  .kicker {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  .lead { font-family: var(--f-serif); font-size: 16.5px; line-height: 1.6; color: var(--ink-2); max-width: 64ch; }
+  ul, ol { margin: 0 0 14px; padding-left: 20px; max-width: 70ch; }
+  li { margin-bottom: 7px; }
+  li::marker { color: var(--line-strong); }
+  code {
+    font-family: var(--f-mono);
+    font-size: .875em;
+    background: var(--surface-2);
+    padding: 1.5px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+    word-break: break-word;
+  }
+  a { color: var(--accent); }
+
+  /* ---------- phase cards ---------- */
+  .phase {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 22px;
+    margin-bottom: 18px;
+    box-shadow: var(--shadow);
+  }
+  .phase-head { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+  .phase-num {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 3px;
+    padding: 4px 8px;
+    letter-spacing: .05em;
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+  }
+  .phase-head h3 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -.015em; flex: 1 1 200px; line-height: 1.3; }
+  .phase-days {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 3px 7px;
+    white-space: nowrap;
+  }
+  .tick { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 11px; color: var(--muted); cursor: pointer; user-select: none; }
+  .tick input { accent-color: var(--ok); width: 15px; height: 15px; cursor: pointer; margin: 0; }
+  .phase-goal { font-family: var(--f-serif); font-size: 15.5px; color: var(--ink-2); margin: 14px 0 4px; max-width: 64ch; }
+  .phase h4 {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 20px 0 8px;
+    font-weight: 500;
+  }
+  .phase ul { margin-bottom: 0; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+    border: 1px solid transparent;
+  }
+
+  .done-when {
+    margin-top: 18px;
+    border-left: 2px solid var(--ok);
+    background: var(--ok-soft);
+    padding: 12px 15px;
+    border-radius: 0 3px 3px 0;
+  }
+  .done-when h4 { margin-top: 0; color: var(--ok); }
+  .done-when ul { padding-left: 18px; margin-bottom: 0; }
+  .done-when li:last-child { margin-bottom: 0; }
+
+  .capture {
+    margin-top: 14px;
+    border-left: 2px solid var(--signal);
+    background: var(--signal-soft);
+    padding: 12px 15px;
+    border-radius: 0 3px 3px 0;
+  }
+  .capture h4 { margin-top: 0; color: var(--signal); }
+  .capture p { margin: 0; font-size: 14px; max-width: 64ch; }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x: auto; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 520px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--surface-2);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.mono, th.mono { font-family: var(--f-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .pill {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .pill-pending { background: var(--surface-2); color: var(--muted); }
+  .pill-gap { background: var(--signal-soft); color: var(--signal); }
+  .pill-have { background: var(--ok-soft); color: var(--ok); }
+
+  /* ---------- figures ---------- */
+  figure { margin: 0 0 22px; }
+  .figbox {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 20px 18px;
+    overflow-x: auto;
+  }
+  .figbox svg { display: block; width: 100%; min-width: 640px; max-width: 100%; height: auto; color: var(--ink-2); }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 10px; max-width: 68ch; }
+  .svg-box { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1; }
+  .svg-box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.25; }
+  .svg-label { font-family: var(--f-sans); font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+  .svg-sub { font-family: var(--f-mono); font-size: 10.5px; fill: var(--muted); }
+  .svg-edge { font-family: var(--f-mono); font-size: 10.5px; fill: var(--muted); }
+  .svg-band { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .14em; fill: var(--accent); font-weight: 600; }
+  .svg-hot { font-family: var(--f-mono); font-size: 10.5px; fill: var(--signal); font-weight: 500; }
+
+  /* ---------- code block ---------- */
+  pre {
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 0 0 16px;
+    color: var(--ink-2);
+  }
+  pre b { color: var(--ink); font-weight: 600; }
+  pre i { color: var(--muted); font-style: normal; }
+
+  .callout {
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 4px 4px 0;
+    padding: 16px 18px;
+    margin: 0 0 18px;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout strong { color: var(--accent); }
+
+  .cvline {
+    font-family: var(--f-serif);
+    font-size: 15px;
+    line-height: 1.6;
+    border-left: 2px solid var(--line-strong);
+    padding: 2px 0 2px 16px;
+    margin: 0 0 16px;
+    max-width: 66ch;
+    color: var(--ink);
+  }
+  .cvline em { color: var(--signal); font-style: normal; font-family: var(--f-mono); font-size: .85em; }
+
+  footer {
+    border-top: 1px solid var(--line);
+    margin-top: 48px;
+    padding-top: 22px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <p class="eyebrow">Build spec · Go backend · target: Muze</p>
+    <h1>Murmur</h1>
+    <p class="deck">A real-time feed and fanout service in Go. Posts land in Postgres, travel an event bus, and are pushed into per-user timelines in Redis — except for creators too large to push to, whose posts are merged in at read time. The whole project exists to produce one honest number: the follower count where pushing stops being worth it.</p>
+    <dl class="factbar">
+      <div class="fact"><dt>Services</dt><dd>3 + 1 worker</dd></div>
+      <div class="fact"><dt>Core stack</dt><dd>Go · GraphQL · gRPC</dd></div>
+      <div class="fact"><dt>Data</dt><dd>Postgres · Redis · NATS</dd></div>
+      <div class="fact"><dt>Phases</dt><dd>9</dd></div>
+      <div class="fact"><dt>Estimate</dt><dd>26 working days</dd></div>
+    </dl>
+  </header>
+
+  <div class="layout">
+
+    <nav class="rail" aria-label="Spec contents">
+      <p class="rail-title">Contents</p>
+      <ul class="rail-list" id="rail">
+        <li><a href="#fit"><span class="n">··</span><span>Why this project</span></a></li>
+        <li><a href="#arch"><span class="n">··</span><span>Architecture</span></a></li>
+        <li><a href="#problems"><span class="n">··</span><span>The three problems</span></a></li>
+        <li><a href="#data"><span class="n">··</span><span>Data model</span></a></li>
+        <li data-phase="0"><a href="#p0"><span class="n">00</span><span>Foundations</span></a></li>
+        <li data-phase="1"><a href="#p1"><span class="n">01</span><span>Domain over gRPC</span></a></li>
+        <li data-phase="2"><a href="#p2"><span class="n">02</span><span>GraphQL gateway</span></a></li>
+        <li data-phase="3"><a href="#p3"><span class="n">03</span><span>Fanout on write</span></a></li>
+        <li data-phase="4"><a href="#p4"><span class="n">04</span><span>Hybrid cutover</span></a></li>
+        <li data-phase="5"><a href="#p5"><span class="n">05</span><span>Caching &amp; read path</span></a></li>
+        <li data-phase="6"><a href="#p6"><span class="n">06</span><span>Subscriptions</span></a></li>
+        <li data-phase="7"><a href="#p7"><span class="n">07</span><span>Auth &amp; hardening</span></a></li>
+        <li data-phase="8"><a href="#p8"><span class="n">08</span><span>Deploy &amp; prove</span></a></li>
+        <li><a href="#scoreboard"><span class="n">··</span><span>Scoreboard</span></a></li>
+        <li><a href="#cv"><span class="n">··</span><span>CV lines</span></a></li>
+        <li><a href="#repo"><span class="n">··</span><span>Repo layout</span></a></li>
+      </ul>
+      <div class="rail-progress">
+        <span id="progress-text">0 / 9 phases</span>
+        <div class="bar"><i id="progress-bar"></i></div>
+      </div>
+    </nav>
+
+    <main>
+
+      <!-- ================= WHY ================= -->
+      <section id="fit" class="sec">
+        <p class="kicker">Section 01</p>
+        <h2>Why this project, for this job</h2>
+        <p class="lead">The JD names eleven things. Your CV already proves five of them. Murmur is scoped so that one repository closes the other six without building anything you'd have to apologise for in an interview.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr><th>JD requirement</th><th>Status today</th><th>Where Murmur covers it</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Go (Golang)</td><td><span class="pill pill-gap">Gap</span></td><td>Every service. Idiomatic Go is a first-class goal, not a side effect.</td></tr>
+              <tr><td>GraphQL</td><td><span class="pill pill-gap">Gap</span></td><td>Phase 2 (queries/mutations), Phase 6 (subscriptions), Phase 7 (complexity limits)</td></tr>
+              <tr><td>gRPC</td><td><span class="pill pill-gap">Gap</span></td><td>Phase 1 — every internal hop is gRPC with deadline propagation</td></tr>
+              <tr><td>Message queues (Kafka/NATS/RabbitMQ)</td><td><span class="pill pill-gap">Gap</span></td><td>Phase 3 — NATS JetStream with a durable pull consumer</td></tr>
+              <tr><td>Real-time, event-driven systems</td><td><span class="pill pill-gap">Gap</span></td><td>Phase 3 and 6 — the whole write path is event-driven</td></tr>
+              <tr><td>Microservices architecture</td><td><span class="pill pill-gap">Gap</span></td><td>3 services + 1 worker, split along genuine scaling boundaries</td></tr>
+              <tr><td>PostgreSQL</td><td><span class="pill pill-have">Have</span></td><td>Source of truth, transactional outbox, cursor pagination</td></tr>
+              <tr><td>Redis</td><td><span class="pill pill-have">Have</span></td><td>Timeline ZSETs, post cache, rate limiter — Lua where atomicity matters</td></tr>
+              <tr><td>Caching &amp; data-fetching strategy</td><td><span class="pill pill-have">Have</span></td><td>Phase 5 — the measured heart of the project</td></tr>
+              <tr><td>Docker, Kubernetes, CI/CD</td><td><span class="pill pill-have">Have</span></td><td>Phase 8 — same muscle as Helios, new stack</td></tr>
+              <tr><td>Load &amp; integration testing</td><td><span class="pill pill-have">Have</span></td><td>testcontainers, k6, and a chaos experiment per failure mode</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <p><strong>The one thing to protect.</strong> Your existing projects all say the same thing about you: you find the failure mode, fix it, and show the before/after number. Murmur is designed to say it again in Go. If a phase starts to feel like CRUD scaffolding, you've drifted — the interesting part is always the measurement.</p>
+        </div>
+      </section>
+
+      <!-- ================= ARCHITECTURE ================= -->
+      <section id="arch" class="sec">
+        <p class="kicker">Section 02</p>
+        <h2>Architecture</h2>
+        <p class="lead">Four processes. The split isn't decorative — each one scales on a different axis, which is the only defensible reason to draw a service boundary.</p>
+
+        <figure>
+          <div class="figbox">
+            <svg viewBox="0 0 900 400" role="img" aria-label="A post travels from the client through the GraphQL gateway and social service into Postgres in one transaction; an outbox relay publishes it to NATS JetStream; a fanout worker consumes it and writes post IDs into per-user Redis timeline sorted sets; reads flow from Redis through the timeline service and gateway back to the client, while NATS also pushes live updates to the gateway's WebSocket subscriptions.">
+              <defs>
+                <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+                </marker>
+                <marker id="ar-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--signal)"></path>
+                </marker>
+              </defs>
+
+              <!-- band labels -->
+              <text class="svg-band" x="20" y="42">WRITE</text>
+              <text class="svg-band" x="596" y="176">FAN OUT</text>
+              <text class="svg-band" x="20" y="310">READ</text>
+
+              <!-- ROW 1 : write -->
+              <rect class="svg-box" x="20" y="56" width="112" height="52" rx="3"></rect>
+              <text class="svg-label" x="76" y="79" text-anchor="middle">Client</text>
+              <text class="svg-sub" x="76" y="95" text-anchor="middle">mutation</text>
+
+              <rect class="svg-box-accent" x="188" y="56" width="148" height="52" rx="3"></rect>
+              <text class="svg-label" x="262" y="79" text-anchor="middle">gateway</text>
+              <text class="svg-sub" x="262" y="95" text-anchor="middle">GraphQL · auth</text>
+
+              <rect class="svg-box" x="392" y="56" width="148" height="52" rx="3"></rect>
+              <text class="svg-label" x="466" y="79" text-anchor="middle">social-svc</text>
+              <text class="svg-sub" x="466" y="95" text-anchor="middle">posts · follows</text>
+
+              <rect class="svg-box" x="596" y="56" width="180" height="52" rx="3"></rect>
+              <text class="svg-label" x="686" y="79" text-anchor="middle">Postgres</text>
+              <text class="svg-sub" x="686" y="95" text-anchor="middle">post + outbox · 1 tx</text>
+
+              <line x1="132" y1="82" x2="181" y2="82" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="156" y="74" text-anchor="middle">post</text>
+              <line x1="336" y1="82" x2="385" y2="82" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="360" y="74" text-anchor="middle">gRPC</text>
+              <line x1="540" y1="82" x2="589" y2="82" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="564" y="74" text-anchor="middle">commit</text>
+
+              <!-- Postgres -> relay -->
+              <line x1="686" y1="108" x2="686" y2="183" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="696" y="150">polls unsent rows</text>
+
+              <!-- ROW 2 : async, right to left -->
+              <rect class="svg-box" x="596" y="190" width="180" height="52" rx="3"></rect>
+              <text class="svg-label" x="686" y="213" text-anchor="middle">outbox relay</text>
+              <text class="svg-sub" x="686" y="229" text-anchor="middle">at-least-once</text>
+
+              <rect class="svg-box-accent" x="392" y="190" width="148" height="52" rx="3"></rect>
+              <text class="svg-label" x="466" y="213" text-anchor="middle">NATS JetStream</text>
+              <text class="svg-sub" x="466" y="229" text-anchor="middle">post.created</text>
+
+              <rect class="svg-box" x="188" y="190" width="148" height="52" rx="3"></rect>
+              <text class="svg-label" x="262" y="213" text-anchor="middle">fanout-worker</text>
+              <text class="svg-sub" x="262" y="229" text-anchor="middle">push or skip</text>
+
+              <line x1="596" y1="216" x2="547" y2="216" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="571" y="208" text-anchor="middle">publish</text>
+              <line x1="392" y1="216" x2="343" y2="216" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="367" y="208" text-anchor="middle">consume</text>
+
+              <!-- fanout -> redis elbow -->
+              <polyline points="262,242 262,284 110,284 110,317" fill="none" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></polyline>
+              <text class="svg-edge" x="272" y="278">pipelined ZADD · idempotent</text>
+
+              <!-- NATS -> gateway (realtime) elbow -->
+              <polyline points="466,242 466,292 548,292 548,317" fill="none" stroke="var(--signal)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar-hot)"></polyline>
+              <text class="svg-hot" x="476" y="262">timeline.{user}</text>
+
+              <!-- ROW 3 : read -->
+              <rect class="svg-box" x="20" y="324" width="180" height="52" rx="3"></rect>
+              <text class="svg-label" x="110" y="347" text-anchor="middle">Redis</text>
+              <text class="svg-sub" x="110" y="363" text-anchor="middle">tl:{user} ZSET · capped</text>
+
+              <rect class="svg-box" x="256" y="324" width="148" height="52" rx="3"></rect>
+              <text class="svg-label" x="330" y="347" text-anchor="middle">timeline-svc</text>
+              <text class="svg-sub" x="330" y="363" text-anchor="middle">k-way merge</text>
+
+              <rect class="svg-box-accent" x="460" y="324" width="176" height="52" rx="3"></rect>
+              <text class="svg-label" x="548" y="347" text-anchor="middle">gateway</text>
+              <text class="svg-sub" x="548" y="363" text-anchor="middle">DataLoader · WS</text>
+
+              <rect class="svg-box" x="692" y="324" width="112" height="52" rx="3"></rect>
+              <text class="svg-label" x="748" y="347" text-anchor="middle">Client</text>
+              <text class="svg-sub" x="748" y="363" text-anchor="middle">timeline</text>
+
+              <line x1="200" y1="350" x2="249" y2="350" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="224" y="342" text-anchor="middle">range</text>
+              <line x1="404" y1="350" x2="453" y2="350" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="428" y="342" text-anchor="middle">hydrate</text>
+              <line x1="636" y1="350" x2="685" y2="350" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar)"></line>
+              <text class="svg-edge" x="660" y="342" text-anchor="middle">1 trip</text>
+            </svg>
+          </div>
+          <figcaption>The write path never touches a follower's timeline synchronously — a publish commits one row and returns. Everything expensive happens behind JetStream, which means a crashed fanout worker costs redelivery, not a lost post. The dashed orange edge is the only path that reaches a client without being asked.</figcaption>
+        </figure>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr><th>Process</th><th>Speaks</th><th>Owns</th><th>Scales with</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="mono">gateway</td><td>GraphQL over HTTP + WS</td><td>Auth, batching, rate limits, subscription hub</td><td>Connected clients</td></tr>
+              <tr><td class="mono">social-svc</td><td>gRPC</td><td>Users, follow edges, posts, the outbox</td><td>Write volume</td></tr>
+              <tr><td class="mono">timeline-svc</td><td>gRPC</td><td>Timeline assembly, merge, ranking, pagination</td><td>Read volume</td></tr>
+              <tr><td class="mono">fanout-worker</td><td>NATS consumer only</td><td>Push/pull routing, timeline writes</td><td>Follower-edge volume</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================= PROBLEMS ================= -->
+      <section id="problems" class="sec">
+        <p class="kicker">Section 03</p>
+        <h2>The three problems worth building for</h2>
+        <p class="lead">Strip these out and Murmur is a CRUD app with extra processes. They are the reason the project is worth three weeks, and they are what an interviewer will actually ask about.</p>
+
+        <h3>1 · Fanout does not survive contact with a large creator</h3>
+        <p>Push-on-write is the obvious design: when someone posts, write that post ID into every follower's timeline. It is also quadratic in the wrong place. A creator with 500,000 followers turns one publish into 500,000 Redis writes — which is fine at 3am and catastrophic when ten of them post at once. Pull-on-read is the opposite trade: publishing is free, but every timeline read has to go fetch from each large creator you follow and merge the results.</p>
+        <p>Neither is right. The answer is a threshold, and the point of the project is that you <em>measure</em> yours instead of copying a number from a conference talk.</p>
+
+        <figure>
+          <div class="figbox">
+            <svg viewBox="0 0 900 300" role="img" aria-label="Side by side comparison. On the left, push fanout turns one new post into N writes into each follower's timeline, so cost lands at publish time. On the right, pull fanout writes the post once into the author's own recent list, and the reader merges it with their pushed timeline at read time, so cost lands at read time.">
+              <defs>
+                <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+                </marker>
+                <marker id="ar2-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--signal)"></path>
+                </marker>
+              </defs>
+
+              <line x1="450" y1="18" x2="450" y2="282" stroke="var(--line)" stroke-width="1"></line>
+
+              <!-- LEFT : push -->
+              <text class="svg-band" x="20" y="32">PUSH · followers &lt; T</text>
+              <rect class="svg-box-accent" x="20" y="108" width="124" height="44" rx="3"></rect>
+              <text class="svg-label" x="82" y="128" text-anchor="middle">new post</text>
+              <text class="svg-sub" x="82" y="143" text-anchor="middle">1 event</text>
+
+              <rect class="svg-box" x="256" y="54" width="150" height="32" rx="3"></rect>
+              <text class="svg-sub" x="331" y="74" text-anchor="middle">tl:{follower 1}</text>
+              <rect class="svg-box" x="256" y="98" width="150" height="32" rx="3"></rect>
+              <text class="svg-sub" x="331" y="118" text-anchor="middle">tl:{follower 2}</text>
+              <rect class="svg-box" x="256" y="142" width="150" height="32" rx="3"></rect>
+              <text class="svg-sub" x="331" y="162" text-anchor="middle">tl:{follower 3}</text>
+              <rect class="svg-box" x="256" y="186" width="150" height="32" rx="3"></rect>
+              <text class="svg-sub" x="331" y="206" text-anchor="middle">… N more</text>
+
+              <line x1="144" y1="130" x2="249" y2="70" stroke="var(--signal)" stroke-width="1.4" marker-end="url(#ar2-hot)"></line>
+              <line x1="144" y1="130" x2="249" y2="114" stroke="var(--signal)" stroke-width="1.4" marker-end="url(#ar2-hot)"></line>
+              <line x1="144" y1="130" x2="249" y2="158" stroke="var(--signal)" stroke-width="1.4" marker-end="url(#ar2-hot)"></line>
+              <line x1="144" y1="130" x2="249" y2="202" stroke="var(--signal)" stroke-width="1.4" marker-end="url(#ar2-hot)"></line>
+
+              <text class="svg-hot" x="20" y="250">write cost: N ZADDs per publish</text>
+              <text class="svg-edge" x="20" y="270">read cost: 1 ZREVRANGE</text>
+
+              <!-- RIGHT : pull -->
+              <text class="svg-band" x="480" y="32">PULL · followers ≥ T</text>
+              <rect class="svg-box-accent" x="480" y="54" width="124" height="44" rx="3"></rect>
+              <text class="svg-label" x="542" y="74" text-anchor="middle">new post</text>
+              <text class="svg-sub" x="542" y="89" text-anchor="middle">1 event</text>
+
+              <rect class="svg-box" x="690" y="54" width="180" height="44" rx="3"></rect>
+              <text class="svg-label" x="780" y="74" text-anchor="middle">author:{id}:recent</text>
+              <text class="svg-sub" x="780" y="89" text-anchor="middle">1 ZADD, always</text>
+
+              <line x1="604" y1="76" x2="683" y2="76" stroke="currentColor" stroke-width="1.25" marker-end="url(#ar2)"></line>
+
+              <rect class="svg-box-accent" x="480" y="150" width="124" height="44" rx="3"></rect>
+              <text class="svg-label" x="542" y="170" text-anchor="middle">reader</text>
+              <text class="svg-sub" x="542" y="185" text-anchor="middle">timeline query</text>
+
+              <rect class="svg-box" x="690" y="150" width="180" height="44" rx="3"></rect>
+              <text class="svg-label" x="780" y="170" text-anchor="middle">tl:{reader}</text>
+              <text class="svg-sub" x="780" y="185" text-anchor="middle">pushed posts only</text>
+
+              <line x1="604" y1="172" x2="683" y2="172" stroke="var(--signal)" stroke-width="1.4" marker-end="url(#ar2-hot)"></line>
+              <polyline points="604,160 650,160 650,100" fill="none" stroke="var(--signal)" stroke-width="1.4" marker-end="url(#ar2-hot)"></polyline>
+              <text class="svg-hot" x="612" y="132">+ H heavy authors</text>
+
+              <text class="svg-edge" x="480" y="250">write cost: 1 ZADD per publish</text>
+              <text class="svg-hot" x="480" y="270">read cost: 1 + H ranges, merged</text>
+            </svg>
+          </div>
+          <figcaption>The orange edges are the ones that multiply. Choosing a threshold is choosing which side you would rather pay on — and since reads outnumber writes roughly 100:1 in a social feed, the crossover sits much higher than intuition suggests. Find yours in Phase 4.</figcaption>
+        </figure>
+
+        <h3>2 · One viral post becomes one hot Redis key</h3>
+        <p>Every timeline containing that post hydrates the same <code>post:{id}</code> key. Redis shards by key, so a single popular post pins one shard's CPU while the rest of the cluster idles — and a cache expiry under load produces a stampede, where a thousand concurrent misses all go to Postgres for the same row.</p>
+        <p>Two fixes, both small, both measurable: an in-process LRU in front of Redis so hot posts never leave the gateway, and <code>singleflight</code> so N concurrent misses for the same key collapse into one downstream fetch. The k6 scenario that proves it is the interesting artefact.</p>
+
+        <h3>3 · GraphQL makes N+1 the default, not the exception</h3>
+        <p>A 50-post timeline asking for <code>author { handle, avatarUrl }</code> and <code>viewerHasLiked</code> naively fires 101 resolver calls, each its own gRPC round trip. The fix — per-request batching via DataLoader — is well known. The valuable part is that you build the naive version first in Phase 2, record the number, then fix it in Phase 5 and record it again. A before/after is worth ten times what an "I used DataLoader" bullet is worth.</p>
+      </section>
+
+      <!-- ================= DATA MODEL ================= -->
+      <section id="data" class="sec">
+        <p class="kicker">Section 04</p>
+        <h2>Data model</h2>
+        <p class="lead">Postgres is the only source of truth. Redis holds nothing that cannot be rebuilt from it — which is what lets you flush the entire cache during a demo and watch the system heal.</p>
+
+        <h3>Postgres</h3>
+<pre><b>users</b>          id uuid pk · handle citext unique · display_name · created_at
+<b>follows</b>        follower_id uuid · followee_id uuid · created_at
+               pk (follower_id, followee_id)
+               <i>index (followee_id, follower_id)  -- "who follows X", paged</i>
+<b>posts</b>          id ulid pk · author_id uuid · body text · created_at · deleted_at
+               <i>index (author_id, created_at desc)</i>
+<b>author_stats</b>   user_id uuid pk · follower_count bigint · fanout_mode enum(push,pull)
+<b>outbox</b>         id bigserial · aggregate_id · type · payload jsonb
+               created_at · published_at null
+               <i>index (published_at) where published_at is null</i>
+<b>refresh_tokens</b> id uuid pk · user_id · token_hash · family_id · used_at · expires_at</pre>
+
+        <div class="callout">
+          <p><strong>Why ULIDs for post IDs.</strong> They sort lexicographically by creation time, so the Redis ZSET score falls out of the ID itself, cursor pagination needs no extra column, and a merge across sources is a plain comparison. A random UUID would force you to carry a timestamp everywhere and keep the two in sync.</p>
+        </div>
+
+        <div class="callout">
+          <p><strong>Why an outbox and not a direct publish.</strong> Writing the post and publishing <code>post.created</code> are two systems. Do them separately and there is a window where the post exists but no timeline ever hears about it — a silent, unreproducible bug. Writing the event into the same transaction as the post, then relaying it, converts that into at-least-once delivery, which the fanout worker is built to tolerate.</p>
+        </div>
+
+        <h3>Redis keyspace</h3>
+<pre><b>tl:{user_id}</b>            ZSET  post_id → score(ts_ms)   capped at 800 via Lua
+<b>author:{id}:recent</b>      ZSET  post_id → score(ts_ms)   capped at 200
+<b>post:{post_id}</b>          STRING hydrated post JSON       TTL 10m
+<b>heavy</b>                   SET   author ids above threshold, refreshed by worker
+<b>rl:{user_id}:{bucket}</b>   STRING token-bucket counter     Lua, Phase 7</pre>
+
+        <div class="callout">
+          <p><strong>The property that makes redelivery safe.</strong> <code>ZADD</code> with the same member is idempotent — re-running it changes nothing. So when JetStream redelivers <code>post.created</code> after a worker dies mid-fanout, the retry is harmless by construction. You do not need dedup tracking; you need to <em>notice</em> that you don't, and say so in the README. This is the same instinct as the idempotency keys in Settle, arrived at from the other direction.</p>
+        </div>
+      </section>
+
+      <!-- ================= PHASES ================= -->
+      <section id="phases" class="sec">
+        <p class="kicker">Section 05</p>
+        <h2>The build, phase by phase</h2>
+        <p class="lead">Nine phases, twenty-six working days. Each one ends with something runnable and, from Phase 2 onward, a number written down. Tick them off as you go — the page remembers.</p>
+
+        <!-- P0 -->
+        <article class="phase" id="p0">
+          <div class="phase-head">
+            <span class="phase-num">00</span>
+            <h3>Foundations</h3>
+            <span class="phase-days">2 days</span>
+            <label class="tick"><input type="checkbox" id="chk-0" data-phase="0"> done</label>
+          </div>
+          <p class="phase-goal">A clean clone runs the whole stack with one command, and CI fails if anyone writes a data race.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li>Go module, <code>cmd/</code> + <code>internal/</code> layout, Makefile with <code>up</code>, <code>test</code>, <code>lint</code>, <code>gen</code>.</li>
+            <li><code>docker-compose.yml</code> for Postgres 16, Redis 7, NATS with JetStream enabled.</li>
+            <li>Migrations with <code>goose</code>; <code>users</code>, <code>follows</code>, <code>posts</code> only for now.</li>
+            <li>Config from environment with sane defaults; structured logging with <code>log/slog</code>.</li>
+            <li>A shared <code>platform</code> package: pgx pool, redis client, NATS connection, each with a constructor that takes a <code>context.Context</code> and returns a close function.</li>
+            <li>Graceful shutdown helper — signal handling, <code>errgroup</code>, drain with timeout. Every binary uses it.</li>
+            <li>GitHub Actions: <code>go vet</code>, <code>staticcheck</code>, <code>go test -race ./...</code>.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">modules</span><span class="chip">context.Context</span><span class="chip">error wrapping</span><span class="chip">defer</span><span class="chip">errgroup</span><span class="chip">log/slog</span><span class="chip">table-driven tests</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li><code>git clone &amp;&amp; make up &amp;&amp; make test</code> is green on a machine that has never seen the repo.</li>
+              <li>Every binary exits cleanly on SIGTERM without dropping in-flight work.</li>
+              <li>The race detector runs on every push.</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- P1 -->
+        <article class="phase" id="p1">
+          <div class="phase-head">
+            <span class="phase-num">01</span>
+            <h3>The domain, over gRPC</h3>
+            <span class="phase-days">3 days</span>
+            <label class="tick"><input type="checkbox" id="chk-1" data-phase="1"> done</label>
+          </div>
+          <p class="phase-goal">A real social graph you can drive entirely from the command line, with no HTTP anywhere.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li><code>api/proto/social/v1/social.proto</code> — <code>CreateUser</code>, <code>Follow</code>, <code>Unfollow</code>, <code>ListFollowers</code> (paged), <code>CreatePost</code>, <code>BatchGetPosts</code>, <code>BatchGetUsers</code>.</li>
+            <li>Codegen through <code>buf</code>; check the generated code in so CI needs no plugins.</li>
+            <li><code>social-svc</code> on pgx/v5 with a connection pool; queries hand-written or via <code>sqlc</code>, never an ORM.</li>
+            <li>Note the <em>Batch</em> methods: design them in from the start. They're what makes Phase 5's DataLoader a twenty-line change rather than a rewrite.</li>
+            <li>Server interceptors: request ID, slog context, panic recovery, and a deadline check that refuses work with under 50ms left.</li>
+            <li>A seeding command: <code>cmd/seed</code> generates N users and a power-law follower distribution. You will need 500k-follower accounts in Phase 4, so build it properly now.</li>
+            <li>Integration tests with <code>testcontainers-go</code> against a real Postgres.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">interfaces</span><span class="chip">struct embedding</span><span class="chip">protobuf codegen</span><span class="chip">grpc interceptors</span><span class="chip">pgx pooling</span><span class="chip">testcontainers</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li><code>grpcurl</code> can create users, follow, post and read back, against the compose stack.</li>
+              <li><code>cmd/seed</code> produces a graph with at least one 500k-follower account in under a few minutes.</li>
+              <li>Integration tests pass against real Postgres in CI, not a mock.</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- P2 -->
+        <article class="phase" id="p2">
+          <div class="phase-head">
+            <span class="phase-num">02</span>
+            <h3>GraphQL gateway — deliberately naive</h3>
+            <span class="phase-days">3 days</span>
+            <label class="tick"><input type="checkbox" id="chk-2" data-phase="2"> done</label>
+          </div>
+          <p class="phase-goal">A working public API, built the obvious way, instrumented well enough to prove the obvious way is slow.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li><code>gqlgen</code>, schema-first. Types: <code>User</code>, <code>Post</code>, <code>Timeline</code>, <code>PageInfo</code>. Queries: <code>me</code>, <code>user(handle)</code>, <code>post(id)</code>, <code>userPosts</code>. Mutations: <code>createPost</code>, <code>follow</code>, <code>unfollow</code>.</li>
+            <li>gRPC clients held for the process lifetime, never per-request. Propagate the request deadline into every call.</li>
+            <li>Field resolvers written the naive way on purpose: <code>Post.author</code> does its own <code>GetUser</code> call.</li>
+            <li>Instrument it: a per-request counter of downstream gRPC calls, exported to Prometheus and logged at the end of each request.</li>
+            <li>OpenTelemetry traces spanning gateway → gRPC → Postgres, so the waterfall is visible in a screenshot.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">gqlgen resolvers</span><span class="chip">http middleware</span><span class="chip">context values</span><span class="chip">prometheus client</span><span class="chip">otel spans</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li>The playground serves a 50-post feed end to end.</li>
+              <li>A trace screenshot shows the resolver fan-out, saved into <code>docs/</code>.</li>
+            </ul>
+          </div>
+          <div class="capture">
+            <h4>Capture this number</h4>
+            <p>Downstream gRPC calls per 50-post timeline request, and p99 latency. Expect something near 100. This is the "before" half of your strongest CV bullet — do not skip it, and do not fix it yet.</p>
+          </div>
+        </article>
+
+        <!-- P3 -->
+        <article class="phase" id="p3">
+          <div class="phase-head">
+            <span class="phase-num">03</span>
+            <h3>Fanout on write</h3>
+            <span class="phase-days">4 days</span>
+            <label class="tick"><input type="checkbox" id="chk-3" data-phase="3"> done</label>
+          </div>
+          <p class="phase-goal">Posting becomes an event. Timelines are built asynchronously, and killing a worker mid-fanout loses nothing.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li>Outbox table plus a relay goroutine in <code>social-svc</code>: claim unpublished rows with <code>FOR UPDATE SKIP LOCKED</code>, publish to JetStream, mark sent. Batch it.</li>
+            <li>JetStream stream <code>POSTS</code>, subject <code>post.created</code>, file storage, durable pull consumer with explicit ack and a max-deliver limit into a DLQ subject.</li>
+            <li><code>fanout-worker</code>: for each event, page through <code>ListFollowers</code>, pipeline capped-ZADD into each <code>tl:{follower}</code>. One Lua script does <code>ZADD</code> + <code>ZREMRANGEBYRANK</code> atomically so the cap can never be violated by an interleaving.</li>
+            <li>Worker concurrency: a bounded worker pool over a channel, with <code>errgroup</code> and a semaphore — not an unbounded <code>go func()</code> per event.</li>
+            <li><code>timeline-svc</code>: <code>ZREVRANGE tl:{user}</code> → <code>BatchGetPosts</code> → return. Gateway's <code>timeline</code> query now hits it.</li>
+            <li>Metrics: <code>fanout_duration_seconds</code> histogram labelled by follower-count bucket, <code>fanout_followers_total</code>, consumer pending depth.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">goroutines</span><span class="chip">channels</span><span class="chip">worker pools</span><span class="chip">semaphore</span><span class="chip">select + ctx.Done</span><span class="chip">redis pipelining</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li>A post by a 1,000-follower account reaches every follower's timeline, verified by reading all 1,000.</li>
+              <li><code>docker kill</code> the worker halfway through a fanout, restart it: every follower ends with exactly one copy of the post. Write this up as a test, not a manual check.</li>
+              <li>A poisoned event lands in the DLQ instead of blocking the consumer forever.</li>
+            </ul>
+          </div>
+          <div class="capture">
+            <h4>Capture this number</h4>
+            <p>Fanout p99 per follower-count bucket (100 / 1k / 10k / 100k), and end-to-end publish-to-visible latency. Also: entries lost across ten kill-restart cycles. That should be zero, and zero is the whole point.</p>
+          </div>
+        </article>
+
+        <!-- P4 -->
+        <article class="phase" id="p4">
+          <div class="phase-head">
+            <span class="phase-num">04</span>
+            <h3>The hybrid cutover</h3>
+            <span class="phase-days">3 days</span>
+            <label class="tick"><input type="checkbox" id="chk-4" data-phase="4"> done</label>
+          </div>
+          <p class="phase-goal">Break the push design on purpose, then fix it with a threshold you measured rather than guessed. This is the centrepiece of the project.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li><strong>First, break it.</strong> Have the 500k-follower account post. Record how long fanout takes, how far the consumer falls behind, and what happens to read latency while it runs. Screenshot the Grafana panel. This is evidence, not a detour.</li>
+            <li><code>author_stats</code> maintained on follow/unfollow; a <code>fanout_mode</code> the worker reads, cached in-process with a short TTL and refreshed from the <code>heavy</code> set.</li>
+            <li>Worker routing: below threshold → push as before. At or above → skip the fanout entirely, write only <code>author:{id}:recent</code>.</li>
+            <li><code>timeline-svc</code> read path becomes a merge: fetch <code>tl:{me}</code>, fetch <code>author:{a}:recent</code> for each heavy author I follow (in parallel, via <code>errgroup</code>), k-way merge by score, dedupe, truncate to the page size.</li>
+            <li>A property test on the merge function, in the spirit of your QuickCheck work: for any set of input streams, the output is sorted descending, contains no duplicates, and is exactly the top-k of the union.</li>
+            <li><strong>Then find the threshold.</strong> A Go benchmark that sweeps follower counts and measures push cost against the read-merge cost it saves. Plot it. Pick the crossover. Write down why.</li>
+            <li>Handle the transition: an account crossing the threshold upward needs no backfill; crossing downward does. Decide and document the policy.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">go test -bench</span><span class="chip">generics for merge</span><span class="chip">container/heap</span><span class="chip">errgroup fan-out</span><span class="chip">property testing</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li>The 500k-follower post is visible to every follower, and publish no longer degrades timeline reads for anyone else.</li>
+              <li>The merge property test passes over hundreds of generated cases.</li>
+              <li><code>docs/adr-001-fanout-threshold.md</code> exists and cites your own benchmark, not a blog post.</li>
+            </ul>
+          </div>
+          <div class="capture">
+            <h4>Capture this number</h4>
+            <p>The crossover threshold, the benchmark that produced it, and the write-amplification reduction for the largest account. Also the read-side cost you accepted in exchange — a trade you can state in both directions is the one that reads as real engineering.</p>
+          </div>
+        </article>
+
+        <!-- P5 -->
+        <article class="phase" id="p5">
+          <div class="phase-head">
+            <span class="phase-num">05</span>
+            <h3>Caching and the read path</h3>
+            <span class="phase-days">3 days</span>
+            <label class="tick"><input type="checkbox" id="chk-5" data-phase="5"> done</label>
+          </div>
+          <p class="phase-goal">Collect the "after" numbers. Kill the N+1, survive a viral post, and make cache invalidation correct rather than hopeful.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li>DataLoader per request (<code>dataloadgen</code>) for users, posts and like-state. Loaders live in request context and die with it — a process-lifetime loader is a correctness bug that leaks one user's data into another's response.</li>
+            <li>Three-tier post hydration: in-process LRU → Redis <code>post:{id}</code> → <code>BatchGetPosts</code> over gRPC.</li>
+            <li><code>singleflight</code> around every miss, so a thousand concurrent requests for a viral post produce one downstream fetch.</li>
+            <li>Invalidation: on edit or delete, remove from Redis and publish <code>post.updated</code>; each gateway instance drops its local LRU entry on receipt. Accept that the local tier is eventually consistent and bound the window with a short TTL.</li>
+            <li>Cursor pagination on the ULID, replacing any offset pagination.</li>
+            <li>k6 scenarios: <code>baseline</code> (steady mixed read/write) and <code>viral</code> (5k VUs converging on one post).</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">singleflight</span><span class="chip">sync.RWMutex</span><span class="chip">generics</span><span class="chip">LRU caches</span><span class="chip">pprof</span><span class="chip">benchmark profiling</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li>Timeline requests issue a small constant number of downstream calls regardless of page size.</li>
+              <li>Under the <code>viral</code> scenario, downstream fetches for the hot post stay flat as virtual users climb.</li>
+              <li>An edited post never serves stale content beyond the documented TTL, and there is a test that proves the bound.</li>
+            </ul>
+          </div>
+          <div class="capture">
+            <h4>Capture this number</h4>
+            <p>Calls per request before and after (your Phase 2 number is the "before"). Cache hit ratio by tier. Redis ops on the hot key with and without singleflight. Timeline p99 before and after. These four are the reason the project exists.</p>
+          </div>
+        </article>
+
+        <!-- P6 -->
+        <article class="phase" id="p6">
+          <div class="phase-head">
+            <span class="phase-num">06</span>
+            <h3>Real-time subscriptions</h3>
+            <span class="phase-days">3 days</span>
+            <label class="tick"><input type="checkbox" id="chk-6" data-phase="6"> done</label>
+          </div>
+          <p class="phase-goal">Live timeline updates that work when the publisher and the subscriber are on different pods, and that a slow client cannot stall.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li>GraphQL subscription <code>timelineUpdates</code> over the <code>graphql-transport-ws</code> protocol.</li>
+            <li>The fanout worker publishes a light notification to <code>timeline.{user_id}</code>; each gateway subscribes only to the subjects for users currently connected to <em>it</em>. Any pod can serve any user, because NATS is the routing layer — this is the part people get wrong with an in-memory hub.</li>
+            <li>Per-connection hub: a bounded buffered channel, a writer goroutine, ping/pong keepalive, and a hard read deadline.</li>
+            <li>Backpressure policy, decided and documented: when a client's buffer fills, drop the oldest and send a <code>gap</code> signal telling the client to refetch. Never block the publisher on a slow reader.</li>
+            <li>Resume on reconnect: the client sends its last seen cursor, and the server replays from <code>tl:{user}</code> up to a bounded window.</li>
+            <li>Connection metrics: live connections, send-buffer high-water mark, dropped frames, delivery latency.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">websockets</span><span class="chip">bounded channels</span><span class="chip">select with default</span><span class="chip">context cancellation</span><span class="chip">goroutine leak detection</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li>Three gateway replicas: publish through replica A, receive on a client connected to replica C.</li>
+              <li>A client that deliberately stops reading gets disconnected or gapped, and every other client's latency is unaffected.</li>
+              <li><code>goleak</code> confirms no goroutines survive a closed connection.</li>
+            </ul>
+          </div>
+          <div class="capture">
+            <h4>Capture this number</h4>
+            <p>Concurrent connections held per pod and the memory that costs, publish-to-client delivery p99 across pods, and the effect of one deliberately slow consumer on everyone else's p99 — ideally none.</p>
+          </div>
+        </article>
+
+        <!-- P7 -->
+        <article class="phase" id="p7">
+          <div class="phase-head">
+            <span class="phase-num">07</span>
+            <h3>Auth and hardening</h3>
+            <span class="phase-days">2 days</span>
+            <label class="tick"><input type="checkbox" id="chk-7" data-phase="7"> done</label>
+          </div>
+          <p class="phase-goal">Make the public surface safe to point at the internet, including the attack that is specific to GraphQL.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li>Argon2id password hashing with per-user salt and constant-time comparison.</li>
+            <li>Short-lived JWT access tokens plus refresh-token rotation: tokens stored hashed, grouped into a family, and reuse of a spent token revokes the whole family. This is the detection mechanism, not a nicety.</li>
+            <li>gRPC auth interceptor: the gateway signs an internal assertion carrying the caller's identity; backend services verify it and never trust a raw header.</li>
+            <li>Per-user token-bucket rate limiting in Redis Lua — the same technique as Orion Queue's atomic pop, applied to a different problem.</li>
+            <li><strong>Query complexity and depth limits.</strong> An unbounded GraphQL API lets one request ask for followers-of-followers-of-followers and take the cluster down. Set a complexity budget, reject over it with a useful error, and write the test that fires the malicious query.</li>
+            <li>Input validation at the edge, persisted-query allowlist as a stretch, introspection off in production.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">crypto/subtle</span><span class="chip">argon2</span><span class="chip">jwt</span><span class="chip">gqlgen extensions</span><span class="chip">middleware chains</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li>Replaying a used refresh token kills the session family and is covered by a test.</li>
+              <li>A deliberately nested query is rejected by the complexity limiter, with a test that asserts the rejection.</li>
+              <li>A backend service refuses a call that did not come through the gateway.</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- P8 -->
+        <article class="phase" id="p8">
+          <div class="phase-head">
+            <span class="phase-num">08</span>
+            <h3>Deploy, observe, prove</h3>
+            <span class="phase-days">3 days</span>
+            <label class="tick"><input type="checkbox" id="chk-8" data-phase="8"> done</label>
+          </div>
+          <p class="phase-goal">Get it onto a cluster and turn three weeks of work into a README someone will actually read.</p>
+
+          <h4>Build</h4>
+          <ul>
+            <li>Multi-stage distroless Dockerfiles; images well under 30MB.</li>
+            <li>Kubernetes manifests or a small Helm chart: Deployments, Services, HPA on the gateway, a separate HPA on the fanout worker keyed to JetStream consumer lag — reuse the KEDA pattern from Helios.</li>
+            <li>Readiness probes that actually check dependencies; liveness probes that don't.</li>
+            <li>PodDisruptionBudget and a graceful-shutdown window long enough to drain WebSocket connections.</li>
+            <li>GitHub Actions: test → build → push → deploy, with the k6 baseline run as a gate.</li>
+            <li>Grafana dashboard: fanout latency by bucket, timeline read p99, cache hit ratio, consumer lag, live connections. Screenshot it into <code>docs/</code>.</li>
+            <li>Chaos experiments: kill a fanout worker under load; sever Redis and confirm reads degrade to Postgres rather than erroring; partition NATS and confirm the outbox drains on recovery.</li>
+            <li>README with the architecture diagram, the threshold ADR, and a results table of every number you captured.</li>
+          </ul>
+
+          <h4>Go you'll meet</h4>
+          <div class="chips"><span class="chip">build flags</span><span class="chip">distroless images</span><span class="chip">health checks</span><span class="chip">pprof in prod</span><span class="chip">graceful drain</span></div>
+
+          <div class="done-when">
+            <h4>Done when</h4>
+            <ul>
+              <li>The full system runs on a real cluster and survives a pod kill during a load test with zero failed requests.</li>
+              <li>Redis going away degrades the read path instead of breaking it.</li>
+              <li>The README's results table is complete, with the measurement method next to each number.</li>
+            </ul>
+          </div>
+        </article>
+
+        <div class="callout">
+          <p><strong>If you need to ship sooner.</strong> Phases 0–5 are the resume-critical core: they contain Go, gRPC, GraphQL, NATS, the hybrid fanout, and every before/after number. That's fifteen working days. Phases 6–8 make it a system rather than a service — worth doing, but you could apply after Phase 5 with an honest "subscriptions and cluster deploy in progress" and lose very little.</p>
+        </div>
+      </section>
+
+      <!-- ================= SCOREBOARD ================= -->
+      <section id="scoreboard" class="sec">
+        <p class="kicker">Section 06</p>
+        <h2>Scoreboard</h2>
+        <p class="lead">Fill this in as you go. Every row is a sentence you'll be able to say out loud in an interview, with the method attached so it holds up to a follow-up question.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr><th>Measurement</th><th class="mono">Before</th><th class="mono">After</th><th>Phase</th><th>Method</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Downstream calls per 50-post timeline</td><td class="mono">—</td><td class="mono">—</td><td class="mono">02 → 05</td><td>Per-request counter, Prometheus</td></tr>
+              <tr><td>Timeline read p99</td><td class="mono">—</td><td class="mono">—</td><td class="mono">02 → 05</td><td>k6 baseline, 500 VU</td></tr>
+              <tr><td>Fanout p99, 100k-follower author</td><td class="mono">—</td><td class="mono">—</td><td class="mono">03 → 04</td><td>Histogram by follower bucket</td></tr>
+              <tr><td>Publish-to-visible latency</td><td class="mono">—</td><td class="mono">—</td><td class="mono">03</td><td>Timestamp delta, end to end</td></tr>
+              <tr><td>Fanout threshold (crossover)</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">04</td><td><code>go test -bench</code> sweep</td></tr>
+              <tr><td>Write amplification, largest author</td><td class="mono">—</td><td class="mono">—</td><td class="mono">04</td><td>Redis ops counted per publish</td></tr>
+              <tr><td>Timeline entries lost per worker kill</td><td class="mono">—</td><td class="mono">0</td><td class="mono">03</td><td>10 kill-restart cycles, asserted</td></tr>
+              <tr><td>Cache hit ratio, LRU / Redis</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">05</td><td>Counter ratio under k6 baseline</td></tr>
+              <tr><td>Hot-key Redis ops, viral post</td><td class="mono">—</td><td class="mono">—</td><td class="mono">05</td><td>5k VU converging on one post</td></tr>
+              <tr><td>Concurrent WS connections per pod</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">06</td><td>Ramped connection load test</td></tr>
+              <tr><td>Cross-pod delivery p99</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">06</td><td>3 replicas, publish A → receive C</td></tr>
+              <tr><td>Failed requests during pod kill</td><td class="mono">—</td><td class="mono">0</td><td class="mono">08</td><td>Chaos experiment under load</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="font-size:13px;color:var(--muted);">Dashes are unmeasured, not unknown — replace each one the day you capture it, and note the machine and dataset size beside it. A number without its conditions is not evidence.</p>
+      </section>
+
+      <!-- ================= CV ================= -->
+      <section id="cv" class="sec">
+        <p class="kicker">Section 07</p>
+        <h2>What this becomes on your CV</h2>
+        <p class="lead">Written in the register your existing bullets already use — a mechanism, a consequence, a number. Placeholders in orange get replaced with what you actually measure.</p>
+
+        <p class="cvline"><strong>Murmur: Real-Time Feed &amp; Fanout Service</strong><br>Go, GraphQL (gqlgen), gRPC, PostgreSQL, Redis, NATS JetStream, Kubernetes, OpenTelemetry, k6</p>
+
+        <p class="cvline">Routed post fanout by author size instead of pushing to every follower, after benchmarking the crossover at <em>T</em> followers; a <em>500k</em>-follower publish went from <em>N</em> Redis writes to one, and stopped degrading timeline reads for unrelated users.</p>
+
+        <p class="cvline">Cut downstream calls per 50-post timeline from <em>~101</em> to <em>3</em> with per-request DataLoader batching and a three-tier post cache, taking read p99 from <em>X</em>ms to <em>Y</em>ms.</p>
+
+        <p class="cvline">Made fanout safe under at-least-once delivery by keeping timeline writes idempotent, so killing a worker mid-fanout across ten cycles left <em>0</em> lost and <em>0</em> duplicated entries; a transactional outbox closed the window where a committed post could be published to nobody.</p>
+
+        <p class="cvline">Held <em>N</em> concurrent GraphQL subscriptions per pod with bounded per-connection buffers and NATS subject routing, so a publish on one replica reaches a client on another in <em>X</em>ms and one deliberately slow consumer leaves other clients' p99 unchanged.</p>
+
+        <p class="cvline">Collapsed a viral-post cache stampede with <code>singleflight</code>, holding downstream fetches flat at <em>1</em> while virtual users climbed to <em>5,000</em>.</p>
+
+        <div class="callout">
+          <p><strong>On the cover letter.</strong> The JD says no experience required, which means the projects carry the application. Lead with the threshold benchmark — it is the one thing in your portfolio that is specifically about <em>their</em> problem, and it demonstrates the habit they're hiring for: you didn't pick a number, you measured one.</p>
+        </div>
+      </section>
+
+      <!-- ================= REPO ================= -->
+      <section id="repo" class="sec">
+        <p class="kicker">Section 08</p>
+        <h2>Repository layout</h2>
+        <p class="lead">Standard Go project structure, with the domain kept free of infrastructure imports so the interesting logic stays unit-testable without a container.</p>
+
+<pre>murmur/
+├── <b>api/</b>
+│   ├── proto/              <i>.proto sources, buf.yaml, generated pb.go</i>
+│   └── graphql/            <i>schema.graphqls, gqlgen.yml</i>
+├── <b>cmd/</b>
+│   ├── gateway/            <i>GraphQL + WebSocket edge</i>
+│   ├── social-svc/         <i>write path, follow graph, outbox relay</i>
+│   ├── timeline-svc/       <i>read path, merge, pagination</i>
+│   ├── fanout-worker/      <i>JetStream consumer</i>
+│   └── seed/               <i>power-law graph generator</i>
+├── <b>internal/</b>
+│   ├── domain/             <i>entities and rules — no infra imports</i>
+│   ├── social/             <i>follows, posts, outbox</i>
+│   ├── timeline/           <i>merge, ranking, cursors</i>
+│   ├── fanout/             <i>push/pull routing</i>
+│   ├── cache/              <i>LRU + singleflight + redis tiers</i>
+│   ├── auth/               <i>argon2, jwt, refresh rotation</i>
+│   └── platform/           <i>pg, redis, nats, otel, config, shutdown</i>
+├── <b>migrations/</b>
+├── <b>deploy/</b>
+│   ├── docker-compose.yml
+│   └── k8s/                <i>manifests or helm chart</i>
+├── <b>loadtest/</b>            <i>k6: baseline.js, viral.js, connections.js</i>
+├── <b>docs/</b>
+│   ├── build-spec.html     <i>this document</i>
+│   ├── adr-001-fanout-threshold.md
+│   └── screenshots/
+└── Makefile</pre>
+
+        <h3>Dependencies worth pinning early</h3>
+        <div class="chips">
+          <span class="chip">99designs/gqlgen</span>
+          <span class="chip">grpc/grpc-go</span>
+          <span class="chip">bufbuild/buf</span>
+          <span class="chip">jackc/pgx/v5</span>
+          <span class="chip">redis/go-redis/v9</span>
+          <span class="chip">nats-io/nats.go</span>
+          <span class="chip">oklog/ulid</span>
+          <span class="chip">x/sync/singleflight</span>
+          <span class="chip">x/sync/errgroup</span>
+          <span class="chip">hashicorp/golang-lru/v2</span>
+          <span class="chip">vikstrous/dataloadgen</span>
+          <span class="chip">prometheus/client_golang</span>
+          <span class="chip">open-telemetry/otel</span>
+          <span class="chip">testcontainers-go</span>
+          <span class="chip">stretchr/testify</span>
+          <span class="chip">uber-go/goleak</span>
+          <span class="chip">pressly/goose</span>
+        </div>
+      </section>
+
+      <footer>
+        <p>Murmur build spec · drafted 21 September 2026 · nine phases, twenty-six working days. Tick state is stored in this browser only.</p>
+      </footer>
+
+    </main>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var KEY = "murmur-spec-progress";
+    var TOTAL = 9;
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('.tick input[type="checkbox"]'));
+    var bar = document.getElementById("progress-bar");
+    var text = document.getElementById("progress-text");
+    var rail = document.getElementById("rail");
+
+    function load() {
+      try {
+        var raw = window.localStorage.getItem(KEY);
+        if (!raw) return {};
+        var parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function save(state) {
+      try {
+        window.localStorage.setItem(KEY, JSON.stringify(state));
+      } catch (e) {
+        /* private window or blocked storage — the page still works */
+      }
+    }
+
+    function paint(state) {
+      var n = 0;
+      boxes.forEach(function (box) {
+        var id = box.getAttribute("data-phase");
+        var on = state[id] === true;
+        box.checked = on;
+        if (on) n++;
+        var item = rail.querySelector('li[data-phase="' + id + '"]');
+        if (item) item.classList.toggle("rail-done", on);
+      });
+      bar.style.width = Math.round((n / TOTAL) * 100) + "%";
+      text.textContent = n + " / " + TOTAL + " phases";
+    }
+
+    var state = load();
+    paint(state);
+
+    boxes.forEach(function (box) {
+      box.addEventListener("change", function () {
+        state[box.getAttribute("data-phase")] = box.checked;
+        save(state);
+        paint(state);
+      });
+    });
+  })();
+</script>
