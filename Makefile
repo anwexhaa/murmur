@@ -112,10 +112,13 @@ test: ## Run the unit tests under the race detector
 	$(GO_IN_CONTAINER) go test -race -short -count=1 ./...
 
 .PHONY: test-integration
-test-integration: testdb ## Run every test, including those needing Postgres
+test-integration: testdb ## Run every test, including those needing Postgres, Redis and NATS
 	$(DOCKER) $(GO_DOCKER_FLAGS) --network murmur_default \
 		-e MURMUR_TEST_POSTGRES_DSN="postgres://murmur:murmur@postgres:5432/murmur_test?sslmode=disable" \
-		$(GO_IMAGE) go test -race -count=1 ./...
+		-e MURMUR_TEST_REDIS_ADDR="redis:6379" \
+		-e MURMUR_TEST_REDIS_DB="1" \
+		-e MURMUR_TEST_NATS_URL="nats://nats:4222" \
+		$(GO_IMAGE) go test -race -count=1 -timeout 15m ./...
 
 # Integration tests get their own database so a run never destroys the graph
 # in the development one. They truncate between cases, which would otherwise

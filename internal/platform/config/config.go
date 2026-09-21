@@ -36,10 +36,20 @@ type Config struct {
 	// of variable names across four binaries is easier to operate than four
 	// overlapping sets, and a service that ignores a value costs nothing.
 	SocialAddr       string
+	TimelineAddr     string
 	RequestTimeout   time.Duration
 	TimelineFanout   int
 	OTLPEndpoint     string
 	TraceSampleRatio float64
+
+	// Fanout and timeline settings.
+	TimelineCap        int
+	FanoutConcurrency  int
+	FanoutFollowerPage int
+	FanoutMaxDeliver   int
+	FanoutAckWait      time.Duration
+	OutboxBatch        int
+	OutboxInterval     time.Duration
 }
 
 // Postgres holds the source-of-truth database settings.
@@ -86,7 +96,8 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		GRPCAddr:        p.str("GRPC_ADDR", defaultGRPCAddr(defaultHTTPAddr)),
 		ShutdownTimeout: p.dur("SHUTDOWN_TIMEOUT", 20*time.Second),
 
-		SocialAddr: p.str("SOCIAL_ADDR", "localhost:9081"),
+		SocialAddr:   p.str("SOCIAL_ADDR", "localhost:9081"),
+		TimelineAddr: p.str("TIMELINE_ADDR", "localhost:9082"),
 		// A ceiling on the whole GraphQL query, inherited by every downstream
 		// call, so a request the client has already abandoned stops costing
 		// the backends anything.
@@ -95,6 +106,20 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		// Empty disables tracing. Set to jaeger:4317 against the compose stack.
 		OTLPEndpoint:     p.str("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		TraceSampleRatio: p.ratio("OTEL_TRACES_SAMPLER_ARG", 1.0),
+
+		TimelineCap:        p.num("TIMELINE_CAP", 800),
+		FanoutConcurrency:  p.num("FANOUT_CONCURRENCY", 8),
+		FanoutFollowerPage: p.num("FANOUT_FOLLOWER_PAGE", 1000),
+		// Five attempts before an event is parked. Enough to ride out a
+		// restart of a dependency, few enough that a genuinely poisoned event
+		// stops wasting capacity quickly.
+		FanoutMaxDeliver: p.num("FANOUT_MAX_DELIVER", 5),
+		// Longer than the slowest plausible fanout. Too short and JetStream
+		// redelivers a message that is still being processed, doubling the
+		// work; harmless, because the writes are idempotent, but wasteful.
+		FanoutAckWait:  p.dur("FANOUT_ACK_WAIT", 60*time.Second),
+		OutboxBatch:    p.num("OUTBOX_BATCH", 100),
+		OutboxInterval: p.dur("OUTBOX_INTERVAL", 250*time.Millisecond),
 
 		Postgres: Postgres{
 			DSN:            p.str("POSTGRES_DSN", "postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable"),

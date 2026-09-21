@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
+	timelinev1 "github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1"
 	"github.com/anwexhaa/murmur/internal/gateway/callcount"
 	"github.com/anwexhaa/murmur/internal/platform/grpcx"
 )
@@ -25,7 +26,8 @@ import (
 // gain nothing — and under the load phase 5 applies, it would exhaust
 // ephemeral ports long before it exhausted the database.
 type Clients struct {
-	Social socialv1.SocialServiceClient
+	Social   socialv1.SocialServiceClient
+	Timeline timelinev1.TimelineServiceClient
 
 	conns []*grpc.ClientConn
 }
@@ -37,28 +39,42 @@ type Clients struct {
 // briefly down therefore delays the first request rather than preventing the
 // gateway from starting, which is what lets the whole stack come up in any
 // order.
-func Dial(_ context.Context, socialAddr string, log *slog.Logger) (*Clients, func(), error) {
-	conn, err := grpc.NewClient(socialAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithChainUnaryInterceptor(
-			callcount.UnaryClientInterceptor(),
-			forwardRequestID(),
-			perCallDeadline(3*time.Second),
-		),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                30 * time.Second,
-			Timeout:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-	)
+func Dial(_ context.Context, socialAddr, timelineAddr string, log *slog.Logger) (*Clients, func(), error) {
+	dial := func(addr string) (*grpc.ClientConn, error) {
+		return grpc.NewClient(addr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+			grpc.WithChainUnaryInterceptor(
+				callcount.UnaryClientInterceptor(),
+				forwardRequestID(),
+				perCallDeadline(3*time.Second),
+			),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                30 * time.Second,
+				Timeout:             10 * time.Second,
+				PermitWithoutStream: true,
+			}),
+		)
+	}
+
+	socialConn, err := dial(socialAddr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial social service at %s: %w", socialAddr, err)
 	}
 
-	log.Info("social service client ready", "addr", socialAddr)
+	timelineConn, err := dial(timelineAddr)
+	if err != nil {
+		_ = socialConn.Close()
+		return nil, nil, fmt.Errorf("dial timeline service at %s: %w", timelineAddr, err)
+	}
 
-	clients := &Clients{Social: socialv1.NewSocialServiceClient(conn), conns: []*grpc.ClientConn{conn}}
+	log.Info("grpc clients ready", "social", socialAddr, "timeline", timelineAddr)
+
+	clients := &Clients{
+		Social:   socialv1.NewSocialServiceClient(socialConn),
+		Timeline: timelinev1.NewTimelineServiceClient(timelineConn),
+		conns:    []*grpc.ClientConn{socialConn, timelineConn},
+	}
 	return clients, func() {
 		for _, c := range clients.conns {
 			if err := c.Close(); err != nil {

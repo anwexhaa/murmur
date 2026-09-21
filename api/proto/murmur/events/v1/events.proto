@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package murmur.events.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Events published to the bus.
+//
+// These are a contract between services that never call each other, which
+// makes them harder to change than an RPC: a consumer may be replaying a
+// stream written weeks ago by a producer that has since been redeployed. So
+// they carry identifiers rather than content — a post's body can be edited
+// or deleted after the event is written, and a consumer that trusted an
+// inlined copy would act on a version of reality that no longer exists.
+
+// PostCreated says that a post exists and who wrote it. Everything else the
+// fanout worker needs, it looks up.
+message PostCreated {
+  string post_id = 1;
+  string author_id = 2;
+  google.protobuf.Timestamp created_at = 3;
+}

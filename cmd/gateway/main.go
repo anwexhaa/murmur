@@ -69,7 +69,7 @@ func run() error {
 	}
 	defer closeRedis()
 
-	clients, closeClients, err := gateway.Dial(ctx, cfg.SocialAddr, log)
+	clients, closeClients, err := gateway.Dial(ctx, cfg.SocialAddr, cfg.TimelineAddr, log)
 	if err != nil {
 		return fmt.Errorf("social client: %w", err)
 	}

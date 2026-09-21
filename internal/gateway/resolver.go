@@ -40,11 +40,6 @@ const DefaultTimelineFanout = 25
 const (
 	defaultPostPage = 20
 	maxPostPage     = 100
-
-	// Posts fetched per followed account when assembling the naive timeline.
-	// Over-fetching is inherent to merging: any one account could supply the
-	// whole page, so each has to offer enough to fill it.
-	timelineFetchPerAuthor = 20
 )
 
 // errUnauthenticated is returned for fields that need a signed-in viewer.

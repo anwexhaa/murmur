@@ -25,6 +25,10 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	eventsv1 "github.com/anwexhaa/murmur/api/gen/murmur/events/v1"
 
 	"github.com/anwexhaa/murmur/internal/domain"
 	"github.com/anwexhaa/murmur/internal/platform/config"
@@ -42,6 +46,7 @@ type options struct {
 	batchSize      int
 	writers        int
 	reset          bool
+	skipEvents     bool
 	zipfSkew       float64
 	progressEvery  time.Duration
 }
@@ -63,6 +68,7 @@ func run() error {
 	flag.IntVar(&opt.batchSize, "batch", 20_000, "rows per COPY batch")
 	flag.IntVar(&opt.writers, "writers", 4, "concurrent COPY workers")
 	flag.BoolVar(&opt.reset, "reset", false, "truncate every table first")
+	flag.BoolVar(&opt.skipEvents, "skip-events", false, "do not write outbox events for seeded posts (they will never reach a timeline)")
 	flag.Float64Var(&opt.zipfSkew, "skew", 1.2, "Zipf exponent; higher concentrates followers on fewer accounts")
 	flag.DurationVar(&opt.progressEvery, "progress", 5*time.Second, "how often to log progress")
 	flag.Parse()
@@ -318,14 +324,29 @@ func seedPosts(ctx context.Context, log *slog.Logger, store *social.Store, opt o
 	// which keeps the generated IDs consistent with created_at.
 	instant := time.Now().UTC().Add(-time.Duration(total) * time.Millisecond)
 
+	// Seeded posts carry outbox events like any other post, so the relay
+	// publishes them and the fanout worker materialises the timelines. Without
+	// this, a seeded dataset looks complete in Postgres and every feed is empty.
+	events := make([]social.OutboxRecord, 0, opt.batchSize)
+
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
 		}
 		n, err := store.CopyPosts(ctx, batch)
 		written += n
-		batch = batch[:0]
-		return err
+		if err != nil {
+			batch, events = batch[:0], events[:0]
+			return err
+		}
+		if !opt.skipEvents {
+			if _, err := store.CopyOutbox(ctx, events); err != nil {
+				batch, events = batch[:0], events[:0]
+				return err
+			}
+		}
+		batch, events = batch[:0], events[:0]
+		return nil
 	}
 
 	for _, author := range users {
@@ -341,6 +362,22 @@ func seedPosts(ctx context.Context, log *slog.Logger, store *social.Store, opt o
 				Body:      fmt.Sprintf("seeded post %d %s", p, strings.Repeat("banter ", 3)),
 				CreatedAt: instant,
 			})
+
+			if !opt.skipEvents {
+				payload, err := proto.Marshal(&eventsv1.PostCreated{
+					PostId:    id,
+					AuthorId:  author.String(),
+					CreatedAt: timestamppb.New(instant),
+				})
+				if err != nil {
+					return written, err
+				}
+				events = append(events, social.OutboxRecord{
+					AggregateID: id,
+					Type:        social.PostCreatedType,
+					Payload:     payload,
+				})
+			}
 			if len(batch) == opt.batchSize {
 				if err := flush(); err != nil {
 					return written, err

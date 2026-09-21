@@ -25,6 +25,7 @@ import (
 	"github.com/anwexhaa/murmur/internal/platform/httpx"
 	"github.com/anwexhaa/murmur/internal/platform/lifecycle"
 	"github.com/anwexhaa/murmur/internal/platform/logging"
+	"github.com/anwexhaa/murmur/internal/platform/metrics"
 	"github.com/anwexhaa/murmur/internal/platform/otelx"
 	"github.com/anwexhaa/murmur/internal/social"
 )
@@ -71,7 +72,20 @@ func run() error {
 	}
 	defer closeBus()
 
-	service := social.NewService(social.NewStore(pool), domain.NewIDGenerator(), time.Now)
+	if err := bus.EnsureStreams(ctx, events.JS); err != nil {
+		return err
+	}
+
+	store := social.NewStore(pool)
+	service := social.NewService(store, domain.NewIDGenerator(), time.Now)
+
+	registry := metrics.New()
+	relay := social.NewRelay(store, events.JS, social.RelayOptions{
+		Batch:    cfg.OutboxBatch,
+		Interval: cfg.OutboxInterval,
+		Log:      log,
+		Metrics:  social.NewRelayMetrics(registry),
+	})
 
 	checks := health.New(2 * time.Second)
 	checks.Register("postgres", pool.Ping)
@@ -80,6 +94,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.LiveHandler())
 	mux.Handle("GET /readyz", checks.ReadyHandler())
+	mux.Handle("GET /metrics", registry.Handler())
 
 	// The gRPC server is registered before the HTTP one so that, on shutdown,
 	// components stop in reverse and the admin surface outlives the RPC
@@ -97,6 +112,7 @@ func run() error {
 			// disclosure to anyone who can reach the port.
 			Reflection: !cfg.IsProduction(),
 		}),
+		relay.Component(),
 		httpx.Server("http", cfg.HTTPAddr, mux, log),
 	)
 }

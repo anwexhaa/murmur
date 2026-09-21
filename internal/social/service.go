@@ -10,8 +10,10 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	eventsv1 "github.com/anwexhaa/murmur/api/gen/murmur/events/v1"
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
 	"github.com/anwexhaa/murmur/internal/domain"
 )
@@ -257,7 +259,20 @@ func (s *Service) CreatePost(ctx context.Context, req *socialv1.CreatePostReques
 		Body:      strings.TrimSpace(req.GetBody()),
 		CreatedAt: now.UTC(),
 	}
-	if err := s.store.CreatePost(ctx, post); err != nil {
+
+	// The post and its event commit together. A post that exists but whose
+	// event was lost would never reach a single timeline, and nothing
+	// anywhere would record that the fanout was owed.
+	payload, err := proto.Marshal(&eventsv1.PostCreated{
+		PostId:    post.ID,
+		AuthorId:  post.AuthorID.String(),
+		CreatedAt: timestamppb.New(post.CreatedAt),
+	})
+	if err != nil {
+		return nil, status.Error(codes.Internal, "could not encode the post event")
+	}
+
+	if err := s.store.CreatePostWithEvent(ctx, post, payload); err != nil {
 		return nil, toStatus(err)
 	}
 	return &socialv1.CreatePostResponse{Post: postToProto(post)}, nil

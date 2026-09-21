@@ -16,7 +16,7 @@ The full build plan lives in [`docs/build-spec.html`](docs/build-spec.html).
 | 00 | Foundations | **done** |
 | 01 | Domain over gRPC | **done** |
 | 02 | GraphQL gateway | **done** |
-| 03 | Fanout on write | not started |
+| 03 | Fanout on write | **done** |
 | 04 | Hybrid cutover | not started |
 | 05 | Caching and the read path | not started |
 | 06 | Real-time subscriptions | not started |
@@ -28,7 +28,7 @@ The full build plan lives in [`docs/build-spec.html`](docs/build-spec.html).
 Requires Go 1.27, Docker and GNU Make.
 
 ```bash
-make up                # start Postgres, Redis and NATS, then migrate
+make up                # start Postgres, Redis, NATS and Jaeger, then migrate
 make test              # unit tests, race detector on
 make test-integration  # adds the tests that need a real Postgres
 make lint              # go vet and staticcheck
@@ -39,8 +39,10 @@ To drive the API by hand:
 
 ```bash
 make seed ARGS="-reset -users 2000 -avg-following 12 -posts-per-user 6"
-make run-social                          # terminal 1
-make run-gateway                         # terminal 2
+make run-social                          # terminal 1: write path + outbox relay
+make run-fanout                          # terminal 2: materialises timelines
+make run-timeline                        # terminal 3: read path
+make run-gateway                         # terminal 4: GraphQL
 ```
 
 Then open the playground at <http://localhost:8080/>, or the Jaeger UI at
@@ -52,7 +54,7 @@ make smoke                               # end-to-end gRPC flow
 make grpcurl ARGS="murmur-social:9081 list"
 ```
 
-`make up` waits for all three containers to report healthy before applying
+`make up` waits for every container to report healthy before applying
 migrations, so it either works or fails loudly — it never leaves you with a
 half-started stack.
 
@@ -65,7 +67,7 @@ Four processes, split along the axes they actually scale on.
 | `gateway` | GraphQL over HTTP + WS | auth, batching, rate limits, subscriptions | connected clients |
 | `social-svc` | gRPC | users, follow edges, posts, the outbox | write volume |
 | `timeline-svc` | gRPC | timeline assembly, merge, pagination | read volume |
-| `fanout-worker` | NATS consumer | push/pull routing, timeline writes | follower-edge volume |
+| `fanout-worker` | JetStream consumer | push/pull routing, timeline writes | follower-edge volume |
 
 Each serves `/healthz` and `/readyz` on its own port (8080–8083). The two
 probes are deliberately different: liveness touches nothing, because a
@@ -82,7 +84,9 @@ api/gen/      generated protobuf Go, committed so CI needs no plugins
 cmd/          one directory per binary, plus seed and migrate
 internal/
   domain/     entities and rules, no infrastructure imports
-  social/     store (pgx) and the SocialService implementation
+  social/     store (pgx), the SocialService, and the outbox relay
+  timeline/   materialised feeds in Redis, and the TimelineService
+  fanout/     the post.created consumer that writes timelines
   gateway/    resolvers, gRPC clients, middleware, call counting
   platform/   config, logging, lifecycle, health, db, kv, bus, grpcx,
               metrics, otelx
@@ -108,11 +112,15 @@ attached, because a number without its conditions is not evidence.
 
 | Measurement | Value | Phase | Detail |
 |---|---|---|---|
-| Downstream calls per 50-post timeline | **163** | 02 | [phase2-baseline.md](docs/phase2-baseline.md) |
-| Timeline p99 | 45.67 ms | 02 | 200 samples, small dataset — a floor, not a forecast |
+| Downstream calls per 50-post timeline | 163 → **151** | 02 → 03 | [phase2](docs/phase2-baseline.md), [phase3](docs/phase3-fanout.md) |
+| Timeline p99 | 45.67 → 43.06 ms | 02 → 03 | 200 samples; the 150 remaining calls dominate |
+| **Timeline entries lost per worker kill** | **0** | 03 | 10 kill-restart cycles, asserted in a test |
+| **Timeline entries duplicated** | **0** | 03 | same test; `ZADD` is idempotent by construction |
+| Publish-to-visible | 482 ms p50 | 03 | dominated by the relay's 250 ms poll |
+| Fanout cost, under 100 followers | 3.9 ms | 03 | 11,832 events |
+| Fanout cost, 1k–10k followers | 169 ms | 03 | ~8× per order of magnitude |
 | Spans in one timeline trace | 723 | 02 | [traces/phase2-naive-timeline.json](docs/traces/phase2-naive-timeline.json) |
 | Seed: 500k-follower account | 76 s | 01 | 600k users, 2.21M edges |
-| Timeline entries lost per worker kill | — | 03 | |
 | Fanout threshold (crossover) | — | 04 | |
 
 ## Decisions already made
@@ -139,13 +147,23 @@ So they don't get relitigated:
 - **Follow is idempotent.** `ON CONFLICT DO NOTHING` plus a `created` flag, so
   a client retrying after a timeout gets success and the truth, not a
   duplicate-key error it would have to interpret.
-- **The gateway is deliberately naive, and instrumented.** Every resolver does
-  its own lookup and the timeline is assembled at read time. Counting happens
-  in a gRPC client interceptor rather than in the resolvers, so phase 5 can
-  rewrite them to batch without touching the measurement — which is what makes
-  the before/after a fair comparison.
+- **The gateway's field resolvers are deliberately naive, and instrumented.**
+  Each still does its own lookup, and phase 5 batches them. Counting happens in
+  a gRPC client interceptor rather than in the resolvers, so that rewrite
+  cannot touch the measurement — which is what makes the before/after a fair
+  comparison rather than two numbers from two different rulers.
 - **Tracing degrades, never fails.** A missing collector logs a warning and the
   service serves. Observability is not a dependency.
+- **The outbox stores wire bytes, not JSON.** `payload` is `bytea` holding the
+  encoded protobuf exactly as it will be published, so nothing transforms
+  between what was committed and what was delivered.
+- **Timeline writes are idempotent by construction.** `ZADD` of an existing
+  member changes nothing, which is what makes at-least-once delivery safe with
+  no dedup table, no processed-message set and no coordination between workers.
+  Every other safety property in the fanout follows from that one.
+- **Dead-lettering acknowledges the failure.** It feels wrong and is right: a
+  message redelivered forever stops every message behind it, so parking one
+  bad event costs one fanout instead of all of them.
 
 ## Local toolchain caveats
 

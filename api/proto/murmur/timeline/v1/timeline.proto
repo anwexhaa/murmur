@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package murmur.timeline.v1;
+
+import "murmur/social/v1/social.proto";
+
+// TimelineService owns the read path.
+//
+// It reads a timeline that was materialised at write time by the fanout
+// worker, then hydrates the post IDs through the social service. The split
+// matters because the two sides scale on different axes: reads outnumber
+// writes in a feed by roughly a hundred to one, and this is the service that
+// has to absorb that.
+service TimelineService {
+  rpc GetTimeline(GetTimelineRequest) returns (GetTimelineResponse);
+}
+
+message GetTimelineRequest {
+  string user_id = 1;
+  int32 page_size = 2;
+  // The last post ID of the previous page. ULIDs sort by creation time, so
+  // the cursor is the ID and no timestamp travels with it.
+  string page_token = 3;
+}
+
+message GetTimelineResponse {
+  repeated murmur.social.v1.Post posts = 1;
+  string next_page_token = 2;
+
+  // How many IDs the timeline held before hydration.
+  //
+  // A gap between this and len(posts) means posts were deleted after being
+  // fanned out — the timeline is a derived view and is allowed to be briefly
+  // wrong. Reporting it rather than hiding it is what makes that measurable
+  // instead of mysterious.
+  int32 ids_read = 3;
+}

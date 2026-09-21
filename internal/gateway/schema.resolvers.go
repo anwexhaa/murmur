@@ -9,9 +9,9 @@ import (
 	"context"
 
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
+	timelinev1 "github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1"
 	"github.com/anwexhaa/murmur/internal/gateway/gqlgen"
 	"github.com/anwexhaa/murmur/internal/gateway/gqlmodel"
-	"golang.org/x/sync/errgroup"
 )
 
 // CreatePost is the resolver for the createPost field.
@@ -136,19 +136,16 @@ func (r *queryResolver) Post(ctx context.Context, id string) (*gqlmodel.Post, er
 	return postFromProto(resp.GetPost()), nil
 }
 
-// Timeline assembles a home feed by pulling from every account the viewer
-// follows and merging the results.
+// Timeline reads a feed that was materialised at write time.
 //
-// This is the design phase 3 exists to delete. Its cost is proportional to how
-// many accounts you follow, it pays that cost on every read rather than once
-// per write, and it over-fetches by design because any one account could
-// supply the entire page. Reads outnumber writes in a social feed by roughly
-// a hundred to one, so paying at read time is the expensive side of the trade.
+// One call, regardless of how many accounts the viewer follows. Phase 2
+// assembled this at read time — list who you follow, ask each of them for
+// recent posts, merge — which cost one call per followed account on every
+// single read. The fanout worker now does that work once per post instead,
+// and this became a range query behind a single RPC.
 //
-// The fan-out runs concurrently — the naive design is being measured, not
-// handicapped. Sequential calls would make the numbers look worse than the
-// design deserves, and a "before" that is unfairly slow makes the "after"
-// unfairly good.
+// The cost did not disappear; it moved to the side of the trade that is paid
+// less often. Reads outnumber writes in a feed by roughly a hundred to one.
 func (r *queryResolver) Timeline(ctx context.Context, first *int, after *string) (*gqlmodel.PostConnection, error) {
 	viewer, err := requireViewer(ctx)
 	if err != nil {
@@ -157,55 +154,37 @@ func (r *queryResolver) Timeline(ctx context.Context, first *int, after *string)
 
 	limit := pageSize(first, 50, maxPostPage)
 
-	following, err := r.Clients.Social.ListFollowing(ctx, &socialv1.ListFollowingRequest{
-		UserId:   viewer,
-		PageSize: int32(r.fanout()),
-	})
-	if err != nil {
-		return nil, r.translate(ctx, "timeline.following", err)
-	}
-
-	authors := following.GetFolloweeIds()
-	if len(authors) == 0 {
-		return connection(nil, limit), nil
-	}
-
 	cursor := ""
 	if after != nil {
 		cursor = *after
 	}
 
-	streams := make([][]*gqlmodel.Post, len(authors))
-	group, groupCtx := errgroup.WithContext(ctx)
-	// Bounded: an account following hundreds of people should not open
-	// hundreds of simultaneous calls and convert its own slow query into
-	// everyone else's slow query.
-	group.SetLimit(16)
-
-	for i, author := range authors {
-		group.Go(func() error {
-			resp, err := r.Clients.Social.ListAuthorPosts(groupCtx, &socialv1.ListAuthorPostsRequest{
-				AuthorId:  author,
-				PageSize:  timelineFetchPerAuthor,
-				PageToken: cursor,
-			})
-			if err != nil {
-				return err
-			}
-			posts := make([]*gqlmodel.Post, 0, len(resp.GetPosts()))
-			for _, p := range resp.GetPosts() {
-				posts = append(posts, postFromProto(p))
-			}
-			streams[i] = posts
-			return nil
-		})
+	resp, err := r.Clients.Timeline.GetTimeline(ctx, &timelinev1.GetTimelineRequest{
+		UserId:    viewer,
+		PageSize:  int32(limit),
+		PageToken: cursor,
+	})
+	if err != nil {
+		return nil, r.translate(ctx, "timeline", err)
 	}
 
-	if err := group.Wait(); err != nil {
-		return nil, r.translate(ctx, "timeline.posts", err)
+	posts := make([]*gqlmodel.Post, 0, len(resp.GetPosts()))
+	for _, p := range resp.GetPosts() {
+		posts = append(posts, postFromProto(p))
 	}
 
-	return connection(mergePostsNewestFirst(streams, limit), limit), nil
+	conn := connection(posts, limit)
+	// The service decides whether another page exists, because it knows how
+	// many IDs it read before hydration. Posts deleted since fanout make the
+	// returned page shorter than the page that was actually traversed, and
+	// inferring "no more pages" from a short page would end the feed early.
+	if token := resp.GetNextPageToken(); token != "" {
+		conn.PageInfo.HasNextPage = true
+		conn.PageInfo.EndCursor = &token
+	} else {
+		conn.PageInfo.HasNextPage = false
+	}
+	return conn, nil
 }
 
 // FollowerCount is the second N+1: once per user in the response, and a

@@ -432,8 +432,13 @@ func translateFollowError(err error) error {
 // for integration tests, which need a clean slate between cases without
 // paying to recreate the schema. RESTART IDENTITY CASCADE takes the dependent
 // tables with it, so the order of this list does not matter.
+//
+// outbox is listed explicitly because nothing references it: it has no foreign
+// key to posts, deliberately, so that an event outlives the row it describes
+// and a delete cannot strand the fanout. CASCADE therefore does not reach it,
+// and leaving it out here leaks events between tests.
 func (s *Store) TruncateAll(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `TRUNCATE users, follows, posts RESTART IDENTITY CASCADE`)
+	_, err := s.pool.Exec(ctx, `TRUNCATE users, follows, posts, outbox RESTART IDENTITY CASCADE`)
 	if err != nil {
 		return fmt.Errorf("truncate: %w", err)
 	}
