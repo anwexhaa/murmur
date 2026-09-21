@@ -1,0 +1,17 @@
+version: v2
+modules:
+  - path: api/proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # Murmur's RPCs are named for what they do, not <Method>Request-suffixed
+    # against a single service-wide prefix. STANDARD's RPC_REQUEST_STANDARD_NAME
+    # rules would rename CreateUserRequest to SocialServiceCreateUserRequest,
+    # which reads worse at every call site.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use:
+    - FILE

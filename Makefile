@@ -74,42 +74,75 @@ build: ## Build every binary into ./bin
 tidy: ## Sync go.mod and go.sum
 	go mod tidy
 
+# Codegen runs in a container so the plugins are built from the versions
+# pinned in go.mod and nothing has to be installed on the host. The output is
+# committed, so this is rare and CI never runs it.
+.PHONY: generate
+generate: ## Regenerate protobuf and gRPC code from api/proto
+	$(GO_IN_CONTAINER) sh scripts/generate.sh
+
 # ---------------------------------------------------------------------- check
 
-.PHONY: test
-test: ## Run the test suite
-	go test -count=1 ./...
+# The Go toolchain runs in a container for everything that has to execute a
+# binary it just built. `go test` writes its test binaries to the system temp
+# directory and runs them, which this machine's Application Control policy
+# blocks; the race detector separately needs cgo. Both problems disappear in
+# the same Linux image CI uses, which is also the platform these services
+# deploy to.
+#
+# MSYS_NO_PATHCONV stops Git Bash rewriting container-side paths into Windows
+# ones — without it, `-w /src` becomes `-w C:/Program Files/Git/src`. The
+# variable is meaningless on Linux and macOS, and harmless there.
+DOCKER = MSYS_NO_PATHCONV=1 docker
 
-# The race detector needs cgo, which on Windows means installing a C toolchain.
-# Running it in the same Linux image CI uses is both easier and more honest:
-# races are found on the platform the services actually deploy to.
+GO_IMAGE = golang:1.27
+
+# Split so targets needing extra docker flags can insert them before the image
+# name, which must be the last thing on the command line.
+#
+# The module cache is a named volume rather than a host directory: $(HOME) is
+# a backslash path under Git Bash and does not survive being spliced into a
+# volume spec. A named volume needs no host path at all.
+GO_DOCKER_FLAGS = run --rm \
+	-v "$(CURDIR):/src" \
+	-v murmur-gomodcache:/go/pkg/mod \
+	-w /src
+
+GO_IN_CONTAINER = $(DOCKER) $(GO_DOCKER_FLAGS) $(GO_IMAGE)
+
+.PHONY: test
+test: ## Run the unit tests under the race detector
+	$(GO_IN_CONTAINER) go test -race -short -count=1 ./...
+
+.PHONY: test-integration
+test-integration: testdb ## Run every test, including those needing Postgres
+	$(DOCKER) $(GO_DOCKER_FLAGS) --network murmur_default \
+		-e MURMUR_TEST_POSTGRES_DSN="postgres://murmur:murmur@postgres:5432/murmur_test?sslmode=disable" \
+		$(GO_IMAGE) go test -race -count=1 ./...
+
+# Integration tests get their own database so a run never destroys the graph
+# in the development one. They truncate between cases, which would otherwise
+# wipe whatever the seeder just spent four minutes building.
+.PHONY: testdb
+testdb: ## Create the integration-test database if it is missing
+	@$(DOCKER) exec murmur-postgres-1 psql -U murmur -d murmur -tAc \
+		"SELECT 1 FROM pg_database WHERE datname='murmur_test'" | grep -q 1 \
+		|| $(DOCKER) exec murmur-postgres-1 createdb -U murmur murmur_test
+
 .PHONY: test-race
-test-race: ## Run the test suite under the race detector (Linux container)
-	docker run --rm \
-		-v "$(CURDIR):/src" \
-		-v "$(HOME)/go/pkg/mod:/go/pkg/mod" \
-		-w /src golang:1.27 \
-		go test -race -count=1 ./...
+test-race: test ## Alias for test, which already runs with -race
 
 .PHONY: cover
 cover: ## Run tests and print a coverage summary
-	go test -count=1 -coverprofile=coverage.out ./...
-	go tool cover -func=coverage.out
-
-# staticcheck is a tool dependency in go.mod, so its version is pinned with
-# everything else. Built to ./bin for the same reason as migrate.
-bin/staticcheck$(EXE): go.mod go.sum
-	@mkdir -p bin
-	go build -o "$@" honnef.co/go/tools/cmd/staticcheck
+	$(GO_IN_CONTAINER) sh -c 'go test -short -count=1 -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -30'
 
 .PHONY: lint
-lint: bin/staticcheck$(EXE) ## Run go vet and staticcheck
-	go vet ./...
-	./bin/staticcheck$(EXE) ./...
+lint: ## Run go vet and staticcheck
+	$(GO_IN_CONTAINER) sh -c 'go vet ./... && go tool staticcheck ./...'
 
 .PHONY: fmt
 fmt: ## Format the tree
-	go fmt ./...
+	$(GO_IN_CONTAINER) gofmt -w -l .
 
 # Note: formatting is *checked* by TestEveryGoFileIsFormatted rather than by a
 # gofmt step here. The check then holds on machines where the gofmt binary
@@ -119,18 +152,54 @@ check: lint test-race ## Everything CI runs
 
 # ------------------------------------------------------------------- services
 
+# Services run inside the dev container, attached to the compose network.
+#
+# Two reasons. Windows Application Control blocks freshly built binaries from
+# executing on the host, unpredictably and by content, so a host run is not
+# reliable here. And containers are where these processes run from phase 8
+# onward, so local behaviour matches deployed behaviour — service discovery by
+# hostname included.
+DEV_RUN = $(DOCKER) run --rm -i \
+	-v "$(CURDIR):/src" \
+	-v murmur-gomodcache:/go/pkg/mod \
+	-w /src \
+	--network murmur_default \
+	-e POSTGRES_DSN="postgres://murmur:murmur@postgres:5432/murmur?sslmode=disable" \
+	-e REDIS_ADDR="redis:6379" \
+	-e NATS_URL="nats://nats:4222"
+
+.PHONY: seed
+seed: ## Seed a social graph (make seed ARGS="-users 600000 -whale-followers 500000")
+	$(DEV_RUN) $(GO_IMAGE) go run ./cmd/seed $(ARGS)
+
+SMOKE_TARGET ?= murmur-social:9081
+
+# grpcurl is a tool dependency in go.mod, so its version is pinned alongside
+# everything else rather than resolved from the network per invocation.
+.PHONY: smoke
+smoke: ## Drive a running social-svc end to end over gRPC (needs make run-social)
+	$(DEV_RUN) $(GO_IMAGE) sh -c \
+		'go build -o /tmp/grpcurl github.com/fullstorydev/grpcurl/cmd/grpcurl && \
+		 GRPCURL=/tmp/grpcurl sh scripts/smoke.sh $(SMOKE_TARGET)'
+
+.PHONY: grpcurl
+grpcurl: ## Call the social service (make grpcurl ARGS="murmur-social:9081 list")
+	$(DEV_RUN) $(GO_IMAGE) go tool grpcurl -plaintext $(ARGS)
+
+# Fixed container names so `make smoke` and grpcurl can resolve a service by
+# hostname on the compose network.
 .PHONY: run-gateway run-social run-timeline run-fanout
 run-gateway: ## Run the GraphQL edge
-	@go build -o bin/gateway$(EXE) ./cmd/gateway && ./bin/gateway$(EXE)
+	$(DEV_RUN) --name murmur-gateway -p 8080:8080 -p 9080:9080 $(GO_IMAGE) go run ./cmd/gateway
 
 run-social: ## Run the write-path service
-	@go build -o bin/social-svc$(EXE) ./cmd/social-svc && ./bin/social-svc$(EXE)
+	$(DEV_RUN) --name murmur-social -p 8081:8081 -p 9081:9081 $(GO_IMAGE) go run ./cmd/social-svc
 
 run-timeline: ## Run the read-path service
-	@go build -o bin/timeline-svc$(EXE) ./cmd/timeline-svc && ./bin/timeline-svc$(EXE)
+	$(DEV_RUN) --name murmur-timeline -p 8082:8082 -p 9082:9082 $(GO_IMAGE) go run ./cmd/timeline-svc
 
 run-fanout: ## Run the fanout worker
-	@go build -o bin/fanout-worker$(EXE) ./cmd/fanout-worker && ./bin/fanout-worker$(EXE)
+	$(DEV_RUN) --name murmur-fanout -p 8083:8083 $(GO_IMAGE) go run ./cmd/fanout-worker
 
 .PHONY: clean
 clean: ## Remove build output

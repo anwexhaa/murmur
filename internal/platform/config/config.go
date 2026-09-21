@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"time"
@@ -25,6 +26,7 @@ type Config struct {
 	LogLevel        slog.Level
 	LogFormat       string
 	HTTPAddr        string
+	GRPCAddr        string
 	ShutdownTimeout time.Duration
 	Postgres        Postgres
 	Redis           Redis
@@ -61,7 +63,8 @@ func (c Config) IsProduction() bool { return c.Env == "production" }
 
 // Load reads configuration for the named service. defaultHTTPAddr is the
 // admin/HTTP listen address used when HTTP_ADDR is unset, which differs per
-// binary so all four can run on one machine.
+// binary so all four can run on one machine. Services that serve gRPC take
+// their port from GRPC_ADDR, defaulting to the admin port plus 1000.
 func Load(service, defaultHTTPAddr string) (Config, error) {
 	var p parser
 
@@ -71,6 +74,7 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		LogLevel:        p.level("LOG_LEVEL", slog.LevelInfo),
 		LogFormat:       p.str("LOG_FORMAT", "text"),
 		HTTPAddr:        p.str("HTTP_ADDR", defaultHTTPAddr),
+		GRPCAddr:        p.str("GRPC_ADDR", defaultGRPCAddr(defaultHTTPAddr)),
 		ShutdownTimeout: p.dur("SHUTDOWN_TIMEOUT", 20*time.Second),
 
 		Postgres: Postgres{
@@ -98,6 +102,22 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 	}
 
 	return cfg, p.err()
+}
+
+// defaultGRPCAddr derives the gRPC port from the admin port by adding 1000, so
+// social-svc on :8081 serves gRPC on :9081. One convention beats four
+// hard-coded ports, and it keeps the two surfaces obviously paired in logs and
+// in kubectl output.
+func defaultGRPCAddr(httpAddr string) string {
+	host, port, err := net.SplitHostPort(httpAddr)
+	if err != nil {
+		return ""
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return ""
+	}
+	return net.JoinHostPort(host, strconv.Itoa(n+1000))
 }
 
 // parser reads environment variables, accumulating failures so Load can report

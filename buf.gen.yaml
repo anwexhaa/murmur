@@ -1,0 +1,17 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/anwexhaa/murmur/api/gen
+plugins:
+  # Local plugins, resolved from ./bin via the Makefile's PATH. Remote plugins
+  # would need network access on every generate, and this machine's execution
+  # policy blocks binaries run out of the system temp directory, so both halves
+  # of the usual `buf generate` story are unavailable here.
+  - local: protoc-gen-go
+    out: api/gen
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: api/gen
+    opt: paths=source_relative

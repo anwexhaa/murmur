@@ -1,0 +1,176 @@
+syntax = "proto3";
+
+package murmur.social.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// SocialService owns the write path and the follow graph. It is the only
+// service that talks to the source-of-truth database.
+//
+// Two conventions run through this file, and both exist to serve phases that
+// have not been built yet:
+//
+//  1. Batch methods are first-class, not afterthoughts. The gateway's
+//     per-request DataLoader (phase 5) collapses N resolver calls into one of
+//     these; designing them in now makes that a small change rather than a
+//     rewrite of every call site.
+//
+//  2. Follower listings return bare IDs, never User messages. Fanout walks
+//     500,000 edges for a single post and needs nothing but the identifiers —
+//     shipping full user records would multiply that payload by twenty for no
+//     reader.
+service SocialService {
+  // Users.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc BatchGetUsers(BatchGetUsersRequest) returns (BatchGetUsersResponse);
+
+  // The follow graph.
+  rpc Follow(FollowRequest) returns (FollowResponse);
+  rpc Unfollow(UnfollowRequest) returns (UnfollowResponse);
+  rpc ListFollowers(ListFollowersRequest) returns (ListFollowersResponse);
+  rpc ListFollowing(ListFollowingRequest) returns (ListFollowingResponse);
+
+  // Posts.
+  rpc CreatePost(CreatePostRequest) returns (CreatePostResponse);
+  rpc GetPost(GetPostRequest) returns (GetPostResponse);
+  rpc BatchGetPosts(BatchGetPostsRequest) returns (BatchGetPostsResponse);
+  rpc ListAuthorPosts(ListAuthorPostsRequest) returns (ListAuthorPostsResponse);
+}
+
+message User {
+  string id = 1;
+  string handle = 2;
+  string display_name = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message Post {
+  // A ULID: 26 characters, lexicographically ordered by creation time.
+  string id = 1;
+  string author_id = 2;
+  string body = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+// ---------------------------------------------------------------- users
+
+message CreateUserRequest {
+  string handle = 1;
+  string display_name = 2;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message GetUserRequest {
+  // Exactly one of these identifies the user.
+  oneof key {
+    string id = 1;
+    string handle = 2;
+  }
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message BatchGetUsersRequest {
+  repeated string ids = 1;
+}
+
+message BatchGetUsersResponse {
+  // Keyed by user ID. IDs that do not exist are simply absent rather than
+  // present-and-empty, so a caller can tell "deleted" from "never existed"
+  // without a second field. The DataLoader contract needs exactly this.
+  map<string, User> users = 1;
+}
+
+// --------------------------------------------------------- follow graph
+
+message FollowRequest {
+  string follower_id = 1;
+  string followee_id = 2;
+}
+
+message FollowResponse {
+  // False when the edge already existed. Follow is idempotent — a retried
+  // request is not an error — but the caller still deserves to know whether
+  // anything changed.
+  bool created = 1;
+}
+
+message UnfollowRequest {
+  string follower_id = 1;
+  string followee_id = 2;
+}
+
+message UnfollowResponse {
+  bool removed = 1;
+}
+
+message ListFollowersRequest {
+  string user_id = 1;
+  int32 page_size = 2;
+  // The last follower ID from the previous page. Keyset pagination, not
+  // OFFSET: fanout pages through hundreds of thousands of edges, and OFFSET
+  // re-scans everything it has already skipped.
+  string page_token = 3;
+}
+
+message ListFollowersResponse {
+  repeated string follower_ids = 1;
+  string next_page_token = 2;
+}
+
+message ListFollowingRequest {
+  string user_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListFollowingResponse {
+  repeated string followee_ids = 1;
+  string next_page_token = 2;
+}
+
+// ---------------------------------------------------------------- posts
+
+message CreatePostRequest {
+  string author_id = 1;
+  string body = 2;
+}
+
+message CreatePostResponse {
+  Post post = 1;
+}
+
+message GetPostRequest {
+  string id = 1;
+}
+
+message GetPostResponse {
+  Post post = 1;
+}
+
+message BatchGetPostsRequest {
+  repeated string ids = 1;
+}
+
+message BatchGetPostsResponse {
+  map<string, Post> posts = 1;
+}
+
+message ListAuthorPostsRequest {
+  string author_id = 1;
+  int32 page_size = 2;
+  // The last post ID from the previous page. ULIDs sort by creation time, so
+  // the ID is the cursor and no separate timestamp column is needed.
+  string page_token = 3;
+}
+
+message ListAuthorPostsResponse {
+  repeated Post posts = 1;
+  string next_page_token = 2;
+}

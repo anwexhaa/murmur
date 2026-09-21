@@ -44,5 +44,10 @@ jobs:
       # The race detector is the point of this job. Murmur's whole argument is
       # correctness under concurrency, so a data race is a failing build, not a
       # flaky test to rerun.
+      #
+      # No -short, so the integration tests run too. With no
+      # MURMUR_TEST_POSTGRES_DSN set they start their own Postgres through
+      # testcontainers, against the real migrations — the runner has a Docker
+      # daemon, so this needs no service container declared here.
       - name: Test with the race detector
         run: go test -race -count=1 ./...
