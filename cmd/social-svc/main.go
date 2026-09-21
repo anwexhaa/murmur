@@ -25,6 +25,7 @@ import (
 	"github.com/anwexhaa/murmur/internal/platform/httpx"
 	"github.com/anwexhaa/murmur/internal/platform/lifecycle"
 	"github.com/anwexhaa/murmur/internal/platform/logging"
+	"github.com/anwexhaa/murmur/internal/platform/otelx"
 	"github.com/anwexhaa/murmur/internal/social"
 )
 
@@ -42,6 +43,21 @@ func run() error {
 	}
 	log := logging.New(cfg)
 	ctx := context.Background()
+
+	shutdownTracing, err := otelx.Setup(ctx, otelx.Config{
+		ServiceName: cfg.Service,
+		Environment: cfg.Env,
+		Endpoint:    cfg.OTLPEndpoint,
+		SampleRatio: cfg.TraceSampleRatio,
+	}, log)
+	if err != nil {
+		log.Warn("tracing setup failed, continuing without it", "error", err)
+	}
+	defer func() {
+		if err := shutdownTracing(context.Background()); err != nil {
+			log.Warn("flushing traces", "error", err)
+		}
+	}()
 
 	pool, closePool, err := db.Open(ctx, cfg.Postgres, log)
 	if err != nil {

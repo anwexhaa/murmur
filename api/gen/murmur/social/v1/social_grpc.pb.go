@@ -19,17 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SocialService_CreateUser_FullMethodName      = "/murmur.social.v1.SocialService/CreateUser"
-	SocialService_GetUser_FullMethodName         = "/murmur.social.v1.SocialService/GetUser"
-	SocialService_BatchGetUsers_FullMethodName   = "/murmur.social.v1.SocialService/BatchGetUsers"
-	SocialService_Follow_FullMethodName          = "/murmur.social.v1.SocialService/Follow"
-	SocialService_Unfollow_FullMethodName        = "/murmur.social.v1.SocialService/Unfollow"
-	SocialService_ListFollowers_FullMethodName   = "/murmur.social.v1.SocialService/ListFollowers"
-	SocialService_ListFollowing_FullMethodName   = "/murmur.social.v1.SocialService/ListFollowing"
-	SocialService_CreatePost_FullMethodName      = "/murmur.social.v1.SocialService/CreatePost"
-	SocialService_GetPost_FullMethodName         = "/murmur.social.v1.SocialService/GetPost"
-	SocialService_BatchGetPosts_FullMethodName   = "/murmur.social.v1.SocialService/BatchGetPosts"
-	SocialService_ListAuthorPosts_FullMethodName = "/murmur.social.v1.SocialService/ListAuthorPosts"
+	SocialService_CreateUser_FullMethodName             = "/murmur.social.v1.SocialService/CreateUser"
+	SocialService_GetUser_FullMethodName                = "/murmur.social.v1.SocialService/GetUser"
+	SocialService_BatchGetUsers_FullMethodName          = "/murmur.social.v1.SocialService/BatchGetUsers"
+	SocialService_Follow_FullMethodName                 = "/murmur.social.v1.SocialService/Follow"
+	SocialService_Unfollow_FullMethodName               = "/murmur.social.v1.SocialService/Unfollow"
+	SocialService_ListFollowers_FullMethodName          = "/murmur.social.v1.SocialService/ListFollowers"
+	SocialService_ListFollowing_FullMethodName          = "/murmur.social.v1.SocialService/ListFollowing"
+	SocialService_GetFollowerCount_FullMethodName       = "/murmur.social.v1.SocialService/GetFollowerCount"
+	SocialService_BatchGetFollowerCounts_FullMethodName = "/murmur.social.v1.SocialService/BatchGetFollowerCounts"
+	SocialService_IsFollowing_FullMethodName            = "/murmur.social.v1.SocialService/IsFollowing"
+	SocialService_CreatePost_FullMethodName             = "/murmur.social.v1.SocialService/CreatePost"
+	SocialService_GetPost_FullMethodName                = "/murmur.social.v1.SocialService/GetPost"
+	SocialService_BatchGetPosts_FullMethodName          = "/murmur.social.v1.SocialService/BatchGetPosts"
+	SocialService_ListAuthorPosts_FullMethodName        = "/murmur.social.v1.SocialService/ListAuthorPosts"
 )
 
 // SocialServiceClient is the client API for SocialService service.
@@ -61,6 +64,9 @@ type SocialServiceClient interface {
 	Unfollow(ctx context.Context, in *UnfollowRequest, opts ...grpc.CallOption) (*UnfollowResponse, error)
 	ListFollowers(ctx context.Context, in *ListFollowersRequest, opts ...grpc.CallOption) (*ListFollowersResponse, error)
 	ListFollowing(ctx context.Context, in *ListFollowingRequest, opts ...grpc.CallOption) (*ListFollowingResponse, error)
+	GetFollowerCount(ctx context.Context, in *GetFollowerCountRequest, opts ...grpc.CallOption) (*GetFollowerCountResponse, error)
+	BatchGetFollowerCounts(ctx context.Context, in *BatchGetFollowerCountsRequest, opts ...grpc.CallOption) (*BatchGetFollowerCountsResponse, error)
+	IsFollowing(ctx context.Context, in *IsFollowingRequest, opts ...grpc.CallOption) (*IsFollowingResponse, error)
 	// Posts.
 	CreatePost(ctx context.Context, in *CreatePostRequest, opts ...grpc.CallOption) (*CreatePostResponse, error)
 	GetPost(ctx context.Context, in *GetPostRequest, opts ...grpc.CallOption) (*GetPostResponse, error)
@@ -146,6 +152,36 @@ func (c *socialServiceClient) ListFollowing(ctx context.Context, in *ListFollowi
 	return out, nil
 }
 
+func (c *socialServiceClient) GetFollowerCount(ctx context.Context, in *GetFollowerCountRequest, opts ...grpc.CallOption) (*GetFollowerCountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFollowerCountResponse)
+	err := c.cc.Invoke(ctx, SocialService_GetFollowerCount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *socialServiceClient) BatchGetFollowerCounts(ctx context.Context, in *BatchGetFollowerCountsRequest, opts ...grpc.CallOption) (*BatchGetFollowerCountsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BatchGetFollowerCountsResponse)
+	err := c.cc.Invoke(ctx, SocialService_BatchGetFollowerCounts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *socialServiceClient) IsFollowing(ctx context.Context, in *IsFollowingRequest, opts ...grpc.CallOption) (*IsFollowingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IsFollowingResponse)
+	err := c.cc.Invoke(ctx, SocialService_IsFollowing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *socialServiceClient) CreatePost(ctx context.Context, in *CreatePostRequest, opts ...grpc.CallOption) (*CreatePostResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreatePostResponse)
@@ -215,6 +251,9 @@ type SocialServiceServer interface {
 	Unfollow(context.Context, *UnfollowRequest) (*UnfollowResponse, error)
 	ListFollowers(context.Context, *ListFollowersRequest) (*ListFollowersResponse, error)
 	ListFollowing(context.Context, *ListFollowingRequest) (*ListFollowingResponse, error)
+	GetFollowerCount(context.Context, *GetFollowerCountRequest) (*GetFollowerCountResponse, error)
+	BatchGetFollowerCounts(context.Context, *BatchGetFollowerCountsRequest) (*BatchGetFollowerCountsResponse, error)
+	IsFollowing(context.Context, *IsFollowingRequest) (*IsFollowingResponse, error)
 	// Posts.
 	CreatePost(context.Context, *CreatePostRequest) (*CreatePostResponse, error)
 	GetPost(context.Context, *GetPostRequest) (*GetPostResponse, error)
@@ -250,6 +289,15 @@ func (UnimplementedSocialServiceServer) ListFollowers(context.Context, *ListFoll
 }
 func (UnimplementedSocialServiceServer) ListFollowing(context.Context, *ListFollowingRequest) (*ListFollowingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListFollowing not implemented")
+}
+func (UnimplementedSocialServiceServer) GetFollowerCount(context.Context, *GetFollowerCountRequest) (*GetFollowerCountResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFollowerCount not implemented")
+}
+func (UnimplementedSocialServiceServer) BatchGetFollowerCounts(context.Context, *BatchGetFollowerCountsRequest) (*BatchGetFollowerCountsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BatchGetFollowerCounts not implemented")
+}
+func (UnimplementedSocialServiceServer) IsFollowing(context.Context, *IsFollowingRequest) (*IsFollowingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IsFollowing not implemented")
 }
 func (UnimplementedSocialServiceServer) CreatePost(context.Context, *CreatePostRequest) (*CreatePostResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreatePost not implemented")
@@ -410,6 +458,60 @@ func _SocialService_ListFollowing_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SocialService_GetFollowerCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFollowerCountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SocialServiceServer).GetFollowerCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SocialService_GetFollowerCount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SocialServiceServer).GetFollowerCount(ctx, req.(*GetFollowerCountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SocialService_BatchGetFollowerCounts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BatchGetFollowerCountsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SocialServiceServer).BatchGetFollowerCounts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SocialService_BatchGetFollowerCounts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SocialServiceServer).BatchGetFollowerCounts(ctx, req.(*BatchGetFollowerCountsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SocialService_IsFollowing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IsFollowingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SocialServiceServer).IsFollowing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SocialService_IsFollowing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SocialServiceServer).IsFollowing(ctx, req.(*IsFollowingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SocialService_CreatePost_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreatePostRequest)
 	if err := dec(in); err != nil {
@@ -516,6 +618,18 @@ var SocialService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListFollowing",
 			Handler:    _SocialService_ListFollowing_Handler,
+		},
+		{
+			MethodName: "GetFollowerCount",
+			Handler:    _SocialService_GetFollowerCount_Handler,
+		},
+		{
+			MethodName: "BatchGetFollowerCounts",
+			Handler:    _SocialService_BatchGetFollowerCounts_Handler,
+		},
+		{
+			MethodName: "IsFollowing",
+			Handler:    _SocialService_IsFollowing_Handler,
 		},
 		{
 			MethodName: "CreatePost",

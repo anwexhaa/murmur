@@ -175,6 +175,55 @@ func (s *Store) CountFollowers(ctx context.Context, followee uuid.UUID) (int64, 
 	return count, nil
 }
 
+// BatchCountFollowers counts followers for many accounts in one round trip.
+//
+// Accounts with no followers do not appear in the grouped result, so they are
+// filled in as zero here. A caller asking about fifty accounts should get
+// fifty answers, not "some of them".
+func (s *Store) BatchCountFollowers(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]int64, error) {
+	counts := make(map[uuid.UUID]int64, len(ids))
+	for _, id := range ids {
+		counts[id] = 0
+	}
+	if len(ids) == 0 {
+		return counts, nil
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT followee_id, count(*) FROM follows
+		 WHERE followee_id = ANY($1::uuid[])
+		 GROUP BY followee_id`, uuidStrings(ids))
+	if err != nil {
+		return nil, fmt.Errorf("batch count followers: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id    uuid.UUID
+			count int64
+		)
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, fmt.Errorf("scan follower count: %w", err)
+		}
+		counts[id] = count
+	}
+	return counts, rows.Err()
+}
+
+// IsFollowing reports whether one account follows another. EXISTS rather than
+// a count: the planner can stop at the first matching row.
+func (s *Store) IsFollowing(ctx context.Context, follower, followee uuid.UUID) (bool, error) {
+	var following bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = $1 AND followee_id = $2)`,
+		follower, followee).Scan(&following)
+	if err != nil {
+		return false, fmt.Errorf("is following: %w", err)
+	}
+	return following, nil
+}
+
 func (s *Store) listEdge(ctx context.Context, query string, owner uuid.UUID, cursor any, limit int) ([]uuid.UUID, error) {
 	rows, err := s.pool.Query(ctx, query, owner, cursor, limit)
 	if err != nil {

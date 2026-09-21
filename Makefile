@@ -5,7 +5,6 @@
 .DEFAULT_GOAL := help
 
 COMPOSE  := docker compose -f deploy/docker-compose.yml
-PG_DSN   ?= postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable
 SERVICES := gateway social-svc timeline-svc fanout-worker
 CMDS     := $(SERVICES) migrate
 
@@ -41,24 +40,22 @@ logs: ## Follow the stack logs
 
 # ----------------------------------------------------------------- migrations
 
-# Build-then-run rather than `go run`. `go run` executes from the system temp
-# directory, which Windows Application Control blocks on some machines; a
-# binary under ./bin runs everywhere. It is also faster on repeat invocations.
-bin/migrate$(EXE): $(wildcard cmd/migrate/*.go) go.mod go.sum
-	@mkdir -p bin
-	go build -o "$@" ./cmd/migrate
-
+# Migrations run in the container like everything else that executes a freshly
+# built binary. This was native until Application Control began blocking
+# ./bin/migrate after a rebuild changed its contents — the policy decides per
+# binary and re-decides on every build, so "it worked yesterday" is not a
+# property worth depending on.
 .PHONY: migrate
-migrate: bin/migrate$(EXE) ## Apply all pending migrations
-	./bin/migrate$(EXE) -dsn "$(PG_DSN)" up
+migrate: ## Apply all pending migrations
+	$(DEV_RUN) $(GO_IMAGE) go run ./cmd/migrate up
 
 .PHONY: migrate-down
-migrate-down: bin/migrate$(EXE) ## Roll back the most recent migration
-	./bin/migrate$(EXE) -dsn "$(PG_DSN)" down
+migrate-down: ## Roll back the most recent migration
+	$(DEV_RUN) $(GO_IMAGE) go run ./cmd/migrate down
 
 .PHONY: migrate-status
-migrate-status: bin/migrate$(EXE) ## Show which migrations have been applied
-	./bin/migrate$(EXE) -dsn "$(PG_DSN)" status
+migrate-status: ## Show which migrations have been applied
+	$(DEV_RUN) $(GO_IMAGE) go run ./cmd/migrate status
 
 # --------------------------------------------------------------------- build
 
@@ -166,7 +163,9 @@ DEV_RUN = $(DOCKER) run --rm -i \
 	--network murmur_default \
 	-e POSTGRES_DSN="postgres://murmur:murmur@postgres:5432/murmur?sslmode=disable" \
 	-e REDIS_ADDR="redis:6379" \
-	-e NATS_URL="nats://nats:4222"
+	-e NATS_URL="nats://nats:4222" \
+	-e SOCIAL_ADDR="murmur-social:9081" \
+	-e OTEL_EXPORTER_OTLP_ENDPOINT="jaeger:4317"
 
 .PHONY: seed
 seed: ## Seed a social graph (make seed ARGS="-users 600000 -whale-followers 500000")

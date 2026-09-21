@@ -31,6 +31,15 @@ type Config struct {
 	Postgres        Postgres
 	Redis           Redis
 	NATS            NATS
+
+	// Gateway-only settings. They live on the shared Config because one set
+	// of variable names across four binaries is easier to operate than four
+	// overlapping sets, and a service that ignores a value costs nothing.
+	SocialAddr       string
+	RequestTimeout   time.Duration
+	TimelineFanout   int
+	OTLPEndpoint     string
+	TraceSampleRatio float64
 }
 
 // Postgres holds the source-of-truth database settings.
@@ -76,6 +85,16 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		HTTPAddr:        p.str("HTTP_ADDR", defaultHTTPAddr),
 		GRPCAddr:        p.str("GRPC_ADDR", defaultGRPCAddr(defaultHTTPAddr)),
 		ShutdownTimeout: p.dur("SHUTDOWN_TIMEOUT", 20*time.Second),
+
+		SocialAddr: p.str("SOCIAL_ADDR", "localhost:9081"),
+		// A ceiling on the whole GraphQL query, inherited by every downstream
+		// call, so a request the client has already abandoned stops costing
+		// the backends anything.
+		RequestTimeout: p.dur("REQUEST_TIMEOUT", 15*time.Second),
+		TimelineFanout: p.num("TIMELINE_FANOUT", 25),
+		// Empty disables tracing. Set to jaeger:4317 against the compose stack.
+		OTLPEndpoint:     p.str("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		TraceSampleRatio: p.ratio("OTEL_TRACES_SAMPLER_ARG", 1.0),
 
 		Postgres: Postgres{
 			DSN:            p.str("POSTGRES_DSN", "postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable"),
@@ -157,6 +176,26 @@ func (p *parser) dur(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// ratio reads a value that must land between 0 and 1. Out of range is an
+// error rather than a clamp: a sample ratio of 100 almost certainly means
+// somebody meant 100 percent, and silently reading it as 1 would hide that.
+func (p *parser) ratio(key string, def float64) float64 {
+	raw, ok := os.LookupEnv(key)
+	if !ok || raw == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		p.errs = append(p.errs, fmt.Errorf("%s: %q is not a number", key, raw))
+		return def
+	}
+	if f < 0 || f > 1 {
+		p.errs = append(p.errs, fmt.Errorf("%s: %v is outside 0..1", key, f))
+		return def
+	}
+	return f
 }
 
 func (p *parser) level(key string, def slog.Level) slog.Level {

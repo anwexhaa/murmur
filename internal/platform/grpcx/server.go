@@ -9,6 +9,7 @@ import (
 	"net"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
@@ -44,6 +45,10 @@ func Server(opts Options) lifecycle.Component {
 	}
 
 	srv := grpc.NewServer(
+		// Continues the caller's trace rather than starting a new one, so a
+		// GraphQL query and the sixty gRPC calls it makes appear as one
+		// waterfall instead of sixty unrelated traces.
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
 			UnaryRecovery(opts.Log),
 			UnaryRequestID(),

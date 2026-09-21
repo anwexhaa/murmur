@@ -30,6 +30,9 @@ service SocialService {
   rpc Unfollow(UnfollowRequest) returns (UnfollowResponse);
   rpc ListFollowers(ListFollowersRequest) returns (ListFollowersResponse);
   rpc ListFollowing(ListFollowingRequest) returns (ListFollowingResponse);
+  rpc GetFollowerCount(GetFollowerCountRequest) returns (GetFollowerCountResponse);
+  rpc BatchGetFollowerCounts(BatchGetFollowerCountsRequest) returns (BatchGetFollowerCountsResponse);
+  rpc IsFollowing(IsFollowingRequest) returns (IsFollowingResponse);
 
   // Posts.
   rpc CreatePost(CreatePostRequest) returns (CreatePostResponse);
@@ -133,6 +136,34 @@ message ListFollowingRequest {
 message ListFollowingResponse {
   repeated string followee_ids = 1;
   string next_page_token = 2;
+}
+
+message GetFollowerCountRequest {
+  string user_id = 1;
+}
+
+message GetFollowerCountResponse {
+  int64 followers = 1;
+}
+
+message BatchGetFollowerCountsRequest {
+  repeated string user_ids = 1;
+}
+
+message BatchGetFollowerCountsResponse {
+  // Every requested ID appears, including accounts with zero followers —
+  // unlike the entity batches, where absence means "no such row". A count of
+  // zero is an answer, not a miss.
+  map<string, int64> followers = 1;
+}
+
+message IsFollowingRequest {
+  string follower_id = 1;
+  string followee_id = 2;
+}
+
+message IsFollowingResponse {
+  bool following = 1;
 }
 
 // ---------------------------------------------------------------- posts

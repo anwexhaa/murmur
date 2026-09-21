@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/anwexhaa/murmur/internal/platform/config"
@@ -25,6 +26,15 @@ func Open(ctx context.Context, cfg config.Postgres, log *slog.Logger) (*pgxpool.
 	}
 	poolCfg.MaxConns = cfg.MaxConns
 	poolCfg.MinConns = cfg.MinConns
+
+	// Every query becomes a span. This is the deepest level of the trace and
+	// the one that answers the question the other levels only raise: when the
+	// gateway makes sixty calls and each makes one query, the waterfall shows
+	// sixty identical spans side by side, which is what an N+1 looks like.
+	// Span names are the trimmed statement (otelpgx's default), so a trace
+	// shows "SELECT" repeated sixty times rather than sixty copies of the same
+	// long query text. The full SQL stays on the span as an attribute.
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

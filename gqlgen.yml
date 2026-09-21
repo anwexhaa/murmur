@@ -1,0 +1,47 @@
+schema:
+  - api/graphql/*.graphqls
+
+exec:
+  package: gqlgen
+  layout: single-file
+  filename: internal/gateway/gqlgen/generated.go
+
+model:
+  package: gqlmodel
+  filename: internal/gateway/gqlmodel/models_gen.go
+
+resolver:
+  package: gateway
+  layout: follow-schema
+  dir: internal/gateway
+  filename_template: "{name}.resolvers.go"
+
+# Resolvers are forced onto the fields that cost a round trip, rather than
+# being auto-generated away. Phase 2 wants those calls to happen one at a time
+# so the cost is visible; phase 5 batches them and the numbers get compared.
+models:
+  ID:
+    model:
+      - github.com/99designs/gqlgen/graphql.ID
+  Int:
+    model:
+      - github.com/99designs/gqlgen/graphql.Int
+      - github.com/99designs/gqlgen/graphql.Int64
+      - github.com/99designs/gqlgen/graphql.Int32
+  Time:
+    model:
+      - github.com/99designs/gqlgen/graphql.Time
+  Post:
+    model: github.com/anwexhaa/murmur/internal/gateway/gqlmodel.Post
+    fields:
+      author:
+        resolver: true
+  User:
+    model: github.com/anwexhaa/murmur/internal/gateway/gqlmodel.User
+    fields:
+      followerCount:
+        resolver: true
+      viewerFollows:
+        resolver: true
+      posts:
+        resolver: true

@@ -57,6 +57,22 @@ services:
       timeout: 3s
       retries: 20
 
+  # Jaeger all-in-one: OTLP collector, storage and UI in one process. Traces
+  # live in memory and vanish on restart, which is right for a development
+  # stack — nobody should be reasoning about yesterday's local traces.
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317" # OTLP/gRPC
+    healthcheck:
+      # Jaeger v2's healthcheckv2 extension serves /status; the bare root is a
+      # 404, which would keep the container permanently unhealthy.
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:13133/status >/dev/null || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
 volumes:
   pgdata:
   redisdata:

@@ -1082,9 +1082,10 @@
               <tr><th>Measurement</th><th class="mono">Before</th><th class="mono">After</th><th>Phase</th><th>Method</th></tr>
             </thead>
             <tbody>
-              <tr><td>Downstream calls per 50-post timeline</td><td class="mono">—</td><td class="mono">—</td><td class="mono">02 → 05</td><td>Per-request counter, Prometheus</td></tr>
-              <tr><td>Timeline read p99</td><td class="mono">—</td><td class="mono">—</td><td class="mono">02 → 05</td><td>k6 baseline, 500 VU</td></tr>
+              <tr><td>Downstream calls per 50-post timeline</td><td class="mono">163</td><td class="mono">—</td><td class="mono">02 → 05</td><td>Per-request counter, Prometheus</td></tr>
+              <tr><td>Timeline read p99</td><td class="mono">45.7 ms</td><td class="mono">—</td><td class="mono">02 → 05</td><td>200 samples, 2k-user dataset</td></tr>
               <tr><td>Fanout p99, 100k-follower author</td><td class="mono">—</td><td class="mono">—</td><td class="mono">03 → 04</td><td>Histogram by follower bucket</td></tr>
+              <tr><td>Seed: 500k-follower graph</td><td class="mono">n/a</td><td class="mono">76 s</td><td class="mono">01</td><td>600k users, 2.21M edges, COPY</td></tr>
               <tr><td>Publish-to-visible latency</td><td class="mono">—</td><td class="mono">—</td><td class="mono">03</td><td>Timestamp delta, end to end</td></tr>
               <tr><td>Fanout threshold (crossover)</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">04</td><td><code>go test -bench</code> sweep</td></tr>
               <tr><td>Write amplification, largest author</td><td class="mono">—</td><td class="mono">—</td><td class="mono">04</td><td>Redis ops counted per publish</td></tr>

@@ -1,0 +1,85 @@
+"""
+Murmur's public API.
+
+Connections follow the Relay cursor convention. Murmur has no `offset`
+argument anywhere on purpose: OFFSET re-scans every row it skips, and the
+backing stores page by key — follow edges on the follower ID, posts on the
+ULID, which already sorts by creation time.
+"""
+
+scalar Time
+
+type User {
+  id: ID!
+  handle: String!
+  displayName: String!
+  createdAt: Time!
+
+  """
+  How many accounts follow this one.
+
+  From phase 4 this number decides whether a post is pushed to follower
+  timelines or merged in at read time, so it is public here for the same
+  reason it exists internally.
+  """
+  followerCount: Int!
+
+  "Whether the caller follows this account. Null when nobody is signed in."
+  viewerFollows: Boolean
+
+  posts(first: Int = 20, after: String): PostConnection!
+}
+
+type Post {
+  id: ID!
+  body: String!
+  createdAt: Time!
+  author: User!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type PostEdge {
+  node: Post!
+  cursor: String!
+}
+
+type PostConnection {
+  edges: [PostEdge!]!
+  pageInfo: PageInfo!
+}
+
+type FollowResult {
+  "False when the edge already existed. Following is idempotent."
+  changed: Boolean!
+  user: User!
+}
+
+type Query {
+  "The signed-in account, or null."
+  me: User
+
+  user(handle: String!): User
+
+  post(id: ID!): Post
+
+  """
+  The caller's home timeline.
+
+  Phase 2 assembles this the obvious way: list who you follow, fetch each of
+  their recent posts, merge. That is deliberately the wrong design — it does
+  work proportional to how many accounts you follow, on every single read —
+  and it is here to be measured before phase 3 replaces it with a timeline
+  materialised at write time.
+  """
+  timeline(first: Int = 50, after: String): PostConnection!
+}
+
+type Mutation {
+  createPost(body: String!): Post!
+  follow(userId: ID!): FollowResult!
+  unfollow(userId: ID!): FollowResult!
+}

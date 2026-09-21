@@ -178,6 +178,62 @@ func (s *Service) ListFollowing(ctx context.Context, req *socialv1.ListFollowing
 	}, nil
 }
 
+func (s *Service) GetFollowerCount(ctx context.Context, req *socialv1.GetFollowerCountRequest) (*socialv1.GetFollowerCountResponse, error) {
+	id, err := domain.ParseUserID("user_id", req.GetUserId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+
+	count, err := s.store.CountFollowers(ctx, id)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &socialv1.GetFollowerCountResponse{Followers: count}, nil
+}
+
+func (s *Service) BatchGetFollowerCounts(ctx context.Context, req *socialv1.BatchGetFollowerCountsRequest) (*socialv1.BatchGetFollowerCountsResponse, error) {
+	if len(req.GetUserIds()) > MaxPageSize {
+		return nil, status.Errorf(codes.InvalidArgument, "at most %d ids per batch", MaxPageSize)
+	}
+
+	ids := make([]uuid.UUID, 0, len(req.GetUserIds()))
+	for _, raw := range req.GetUserIds() {
+		id, err := domain.ParseUserID("user_ids", raw)
+		if err != nil {
+			return nil, toStatus(err)
+		}
+		ids = append(ids, id)
+	}
+
+	counts, err := s.store.BatchCountFollowers(ctx, ids)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+
+	out := make(map[string]int64, len(counts))
+	for id, count := range counts {
+		out[id.String()] = count
+	}
+	return &socialv1.BatchGetFollowerCountsResponse{Followers: out}, nil
+}
+
+func (s *Service) IsFollowing(ctx context.Context, req *socialv1.IsFollowingRequest) (*socialv1.IsFollowingResponse, error) {
+	follower, err := domain.ParseUserID("follower_id", req.GetFollowerId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	followee, err := domain.ParseUserID("followee_id", req.GetFolloweeId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+
+	following, err := s.store.IsFollowing(ctx, follower, followee)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &socialv1.IsFollowingResponse{Following: following}, nil
+}
+
 // ---------------------------------------------------------------- posts
 
 func (s *Service) CreatePost(ctx context.Context, req *socialv1.CreatePostRequest) (*socialv1.CreatePostResponse, error) {

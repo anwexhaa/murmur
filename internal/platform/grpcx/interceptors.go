@@ -29,6 +29,12 @@ func RequestID(ctx context.Context) string {
 	return id
 }
 
+// WithRequestID attaches a correlation ID. The gateway calls this from its
+// HTTP middleware so the ID it mints reaches the outgoing gRPC metadata.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDContextKey, id)
+}
+
 // UnaryRequestID adopts the caller's request ID, or mints one.
 //
 // Adopting rather than always minting is the point: a single GraphQL query

@@ -15,7 +15,7 @@ The full build plan lives in [`docs/build-spec.html`](docs/build-spec.html).
 |---|---|---|
 | 00 | Foundations | **done** |
 | 01 | Domain over gRPC | **done** |
-| 02 | GraphQL gateway | not started |
+| 02 | GraphQL gateway | **done** |
 | 03 | Fanout on write | not started |
 | 04 | Hybrid cutover | not started |
 | 05 | Caching and the read path | not started |
@@ -35,13 +35,21 @@ make lint              # go vet and staticcheck
 make help              # every target
 ```
 
-To drive the write path by hand:
+To drive the API by hand:
 
 ```bash
-make run-social                          # in one terminal
-make smoke                               # in another: full end-to-end flow
+make seed ARGS="-reset -users 2000 -avg-following 12 -posts-per-user 6"
+make run-social                          # terminal 1
+make run-gateway                         # terminal 2
+```
+
+Then open the playground at <http://localhost:8080/>, or the Jaeger UI at
+<http://localhost:16686>. Sign in by sending an `X-Murmur-User` header with a
+user ID — real auth arrives in phase 7.
+
+```bash
+make smoke                               # end-to-end gRPC flow
 make grpcurl ARGS="murmur-social:9081 list"
-make seed ARGS="-reset -users 600000 -whale-followers 500000 -avg-following 3"
 ```
 
 `make up` waits for all three containers to report healthy before applying
@@ -69,23 +77,43 @@ belong.
 
 ```
 api/proto/    the .proto source of truth
-api/gen/      generated Go, committed so CI needs no plugins
+api/graphql/  the GraphQL schema
+api/gen/      generated protobuf Go, committed so CI needs no plugins
 cmd/          one directory per binary, plus seed and migrate
 internal/
   domain/     entities and rules, no infrastructure imports
   social/     store (pgx) and the SocialService implementation
-  platform/   config, logging, lifecycle, health, db, kv, bus, grpcx
+  gateway/    resolvers, gRPC clients, middleware, call counting
+  platform/   config, logging, lifecycle, health, db, kv, bus, grpcx,
+              metrics, otelx
 migrations/   goose SQL migrations
 scripts/      generate.sh, smoke.sh
 deploy/       docker-compose, kubernetes           (phase 8)
 loadtest/     k6 scenarios                         (phase 5)
-docs/         the build spec, ADRs, screenshots
+docs/         the build spec, measurements, traces
 ```
 
-Regenerating protobuf code is `make generate`. It runs buf and the plugins
-inside a container, built from the versions pinned in `go.mod`, so nothing
-needs installing and the output is reproducible. The generated code is
-committed, so this is rare.
+`make generate` regenerates both layers — buf for protobuf, gqlgen for
+GraphQL — inside a container, from the tool versions pinned in `go.mod`. The
+output is committed, so CI never runs it and nothing needs installing.
+
+Note that gqlgen owns `internal/gateway/schema.resolvers.go` and rewrites it
+on every run, moving anything that is not a resolver out of the file. Helpers
+and constants belong in `resolver.go`, which it leaves alone.
+
+## Measurements
+
+Each phase produces a number. They live in `docs/`, with the conditions
+attached, because a number without its conditions is not evidence.
+
+| Measurement | Value | Phase | Detail |
+|---|---|---|---|
+| Downstream calls per 50-post timeline | **163** | 02 | [phase2-baseline.md](docs/phase2-baseline.md) |
+| Timeline p99 | 45.67 ms | 02 | 200 samples, small dataset — a floor, not a forecast |
+| Spans in one timeline trace | 723 | 02 | [traces/phase2-naive-timeline.json](docs/traces/phase2-naive-timeline.json) |
+| Seed: 500k-follower account | 76 s | 01 | 600k users, 2.21M edges |
+| Timeline entries lost per worker kill | — | 03 | |
+| Fanout threshold (crossover) | — | 04 | |
 
 ## Decisions already made
 
@@ -111,6 +139,13 @@ So they don't get relitigated:
 - **Follow is idempotent.** `ON CONFLICT DO NOTHING` plus a `created` flag, so
   a client retrying after a timeout gets success and the truth, not a
   duplicate-key error it would have to interpret.
+- **The gateway is deliberately naive, and instrumented.** Every resolver does
+  its own lookup and the timeline is assembled at read time. Counting happens
+  in a gRPC client interceptor rather than in the resolvers, so phase 5 can
+  rewrite them to batch without touching the measurement — which is what makes
+  the before/after a fair comparison.
+- **Tracing degrades, never fails.** A missing collector logs a warning and the
+  service serves. Observability is not a dependency.
 
 ## Local toolchain caveats
 
@@ -127,8 +162,10 @@ the policy stays untouched, local runs match CI exactly, and the services get
 their dependencies by hostname on a Docker network, which is how they will
 find each other from phase 8 onward.
 
-Compiling on the host still works, so `make build` and `make migrate` are
-native and fast.
+Compiling on the host still works, so `make build` stays native. Migrations
+were native too until a rebuild changed `./bin/migrate` enough for the policy
+to start blocking it — the decision is per binary and re-made on every build,
+so "it ran yesterday" is not a property worth depending on.
 
 One consequence worth knowing: formatting is asserted by
 `TestEveryGoFileIsFormatted`, which uses `go/format` in-process rather than

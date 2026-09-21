@@ -25,9 +25,19 @@ echo "buf $("$TOOLS/buf" --version)"
 echo "linting the schema"
 buf lint
 
-echo "generating"
+echo "generating protobuf"
 rm -rf api/gen
 buf generate
 
 echo "generated:"
 find api/gen -name '*.go' | sort | sed 's/^/  /'
+
+# gqlgen runs after protobuf because the resolvers it scaffolds reference the
+# generated gRPC client. It typechecks the whole module, so the protobuf
+# output has to exist and compile first.
+echo
+echo "generating graphql"
+go run github.com/99designs/gqlgen generate
+
+echo "generated:"
+find internal/gateway -name '*_gen.go' -o -name 'generated.go' | sort | sed 's/^/  /'
