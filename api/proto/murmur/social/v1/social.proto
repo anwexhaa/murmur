@@ -33,6 +33,8 @@ service SocialService {
   rpc GetFollowerCount(GetFollowerCountRequest) returns (GetFollowerCountResponse);
   rpc BatchGetFollowerCounts(BatchGetFollowerCountsRequest) returns (BatchGetFollowerCountsResponse);
   rpc IsFollowing(IsFollowingRequest) returns (IsFollowingResponse);
+  rpc ListHeavyAuthors(ListHeavyAuthorsRequest) returns (ListHeavyAuthorsResponse);
+  rpc FilterFollowing(FilterFollowingRequest) returns (FilterFollowingResponse);
 
   // Posts.
   rpc CreatePost(CreatePostRequest) returns (CreatePostResponse);
@@ -164,6 +166,32 @@ message IsFollowingRequest {
 
 message IsFollowingResponse {
   bool following = 1;
+}
+
+message ListHeavyAuthorsRequest {
+  // Accounts with at least this many followers. The threshold is a caller
+  // argument rather than server configuration so it can be swept by the
+  // benchmark that chooses it, without a redeploy per data point.
+  int64 threshold = 1;
+  int32 limit = 2;
+}
+
+message ListHeavyAuthorsResponse {
+  repeated string user_ids = 1;
+}
+
+message FilterFollowingRequest {
+  string follower_id = 1;
+  repeated string candidate_ids = 2;
+}
+
+message FilterFollowingResponse {
+  // The subset of candidate_ids that follower_id follows.
+  //
+  // This is how the read path asks "which heavy accounts does this viewer
+  // follow" without ever listing everyone they follow: the candidates are the
+  // heavy set, which is small, and the answer is bounded by it.
+  repeated string followee_ids = 1;
 }
 
 // ---------------------------------------------------------------- posts

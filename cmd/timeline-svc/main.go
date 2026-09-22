@@ -74,9 +74,12 @@ func run() error {
 	defer func() { _ = social.Close() }()
 
 	registry := metrics.New()
+	socialClient := socialv1.NewSocialServiceClient(social)
+	heavy := timeline.NewHeavySet(socialClient, cfg.FanoutThreshold, cfg.HeavySetRefresh, log)
 	service := timeline.NewService(
 		timeline.NewStore(redis, cfg.TimelineCap),
-		socialv1.NewSocialServiceClient(social),
+		socialClient,
+		heavy,
 		log,
 	)
 
@@ -89,6 +92,7 @@ func run() error {
 	mux.Handle("GET /metrics", registry.Handler())
 
 	return lifecycle.Run(ctx, log, cfg.ShutdownTimeout,
+		lifecycle.Component{Name: "heavy-set", Start: heavy.Run},
 		grpcx.Server(grpcx.Options{
 			Name: "grpc",
 			Addr: cfg.GRPCAddr,

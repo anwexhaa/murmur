@@ -17,7 +17,7 @@ The full build plan lives in [`docs/build-spec.html`](docs/build-spec.html).
 | 01 | Domain over gRPC | **done** |
 | 02 | GraphQL gateway | **done** |
 | 03 | Fanout on write | **done** |
-| 04 | Hybrid cutover | not started |
+| 04 | Hybrid cutover | **done** |
 | 05 | Caching and the read path | not started |
 | 06 | Real-time subscriptions | not started |
 | 07 | Auth and hardening | not started |
@@ -85,8 +85,8 @@ cmd/          one directory per binary, plus seed and migrate
 internal/
   domain/     entities and rules, no infrastructure imports
   social/     store (pgx), the SocialService, and the outbox relay
-  timeline/   materialised feeds in Redis, and the TimelineService
-  fanout/     the post.created consumer that writes timelines
+  timeline/   materialised feeds, the merge, and the TimelineService
+  fanout/     the post.created consumer, and the push/pull router
   gateway/    resolvers, gRPC clients, middleware, call counting
   platform/   config, logging, lifecycle, health, db, kv, bus, grpcx,
               metrics, otelx
@@ -121,7 +121,11 @@ attached, because a number without its conditions is not evidence.
 | Fanout cost, 1k–10k followers | 169 ms | 03 | ~8× per order of magnitude |
 | Spans in one timeline trace | 723 | 02 | [traces/phase2-naive-timeline.json](docs/traces/phase2-naive-timeline.json) |
 | Seed: 500k-follower account | 76 s | 01 | 600k users, 2.21M edges |
-| Fanout threshold (crossover) | — | 04 | |
+| **Fanout threshold** | **10,000 followers** | 04 | [adr-001](docs/adr-001-fanout-threshold.md) — measured, not guessed |
+| 500k-follower fanout | 24,522 → **2,594 ms** | 04 | [phase4](docs/phase4-hybrid.md) |
+| Write amplification, largest account | 500,000 → **0** writes | 04 | the post is merged in at read time |
+| Redelivery amplification, before | **4×** (2,000,010 writes for one post) | 04 | the fanout outran its own ack deadline |
+| Read premium per merged author | ~19 µs | 04 | ~200 µs for the first, then pipelined |
 
 ## Decisions already made
 
@@ -164,6 +168,18 @@ So they don't get relitigated:
 - **Dead-lettering acknowledges the failure.** It feels wrong and is right: a
   message redelivered forever stops every message behind it, so parking one
   bad event costs one fanout instead of all of them.
+- **The fanout threshold is a latency budget, not a cost crossover.** Pushing
+  is cheaper than merging at *every* follower count measured, including
+  500,000. What breaks is that one fanout becomes a single indivisible
+  24-second unit of work that outruns its own acknowledgement deadline. The
+  threshold bounds the unit, not the total. See
+  [adr-001](docs/adr-001-fanout-threshold.md).
+- **The author feed is written for every post**, not only for heavy accounts.
+  One extra `ZADD` per post buys both threshold transitions for free: crossing
+  upward needs no backfill, and crossing downward strands nothing.
+- **Follower counts are maintained, and repairable.** Incremented in the same
+  transaction as the edge, rebuilt in one pass by `seed -stats-only`. A
+  maintained counter with no way to check it is a counter nobody should trust.
 
 ## Local toolchain caveats
 

@@ -21,7 +21,7 @@ help: ## Show the available targets
 # ---------------------------------------------------------------- environment
 
 .PHONY: up
-up: ## Start Postgres, Redis and NATS, then migrate
+up: ## Start Postgres, Redis, NATS and Jaeger, then migrate
 	$(COMPOSE) up -d --wait
 	$(MAKE) migrate
 
@@ -132,6 +132,17 @@ testdb: ## Create the integration-test database if it is missing
 .PHONY: test-race
 test-race: test ## Alias for test, which already runs with -race
 
+# The benchmark that chooses the fanout threshold. See
+# docs/adr-001-fanout-threshold.md.
+.PHONY: bench-threshold
+bench-threshold: ## Measure the push/pull crossover against a real Redis
+	$(DOCKER) $(GO_DOCKER_FLAGS) --network murmur_default \
+		-e MURMUR_TEST_REDIS_ADDR="redis:6379" \
+		-e MURMUR_TEST_REDIS_DB="1" \
+		$(GO_IMAGE) go test -count=1 -timeout 25m \
+		-run TestThresholdCrossover -bench 'PushFanout|PullRead|ReadBaseline' \
+		-benchtime 300x -v ./internal/fanout/
+
 .PHONY: cover
 cover: ## Run tests and print a coverage summary
 	$(GO_IN_CONTAINER) sh -c 'go test -short -count=1 -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -30'
@@ -168,6 +179,7 @@ DEV_RUN = $(DOCKER) run --rm -i \
 	-e REDIS_ADDR="redis:6379" \
 	-e NATS_URL="nats://nats:4222" \
 	-e SOCIAL_ADDR="murmur-social:9081" \
+	-e TIMELINE_ADDR="murmur-timeline:9082" \
 	-e OTEL_EXPORTER_OTLP_ENDPOINT="jaeger:4317"
 
 .PHONY: seed

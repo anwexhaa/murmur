@@ -44,6 +44,12 @@ type Options struct {
 	MaxDeliver int
 	AckWait    time.Duration
 
+	// Threshold is the follower count at or above which a post stops being
+	// pushed. Zero means push everything, which is the phase 3 behaviour and
+	// the baseline the benchmark compares against.
+	Threshold     int64
+	RouteCacheTTL time.Duration
+
 	Log     *slog.Logger
 	Metrics *Metrics
 }
@@ -57,7 +63,22 @@ type Metrics struct {
 	Duration  *prometheus.HistogramVec
 	Followers prometheus.Counter
 	Events    *prometheus.CounterVec
-	Pending   prometheus.Gauge
+	// Routed counts posts by the path they took, which is the number that says
+	// whether the threshold is where it should be: almost everything should be
+	// pushed, and the handful that are not should be the accounts big enough
+	// to matter.
+	Routed *prometheus.CounterVec
+
+	// Outstanding is undelivered plus in-flight, not just undelivered.
+	//
+	// JetStream's NumPending counts only messages it has not handed out. A
+	// fanout that takes two minutes is invisible to it: the message was
+	// delivered, so NumPending is zero while the work is very much not done.
+	// Measuring the wrong one made a 500,000-follower fanout look instant.
+	Outstanding prometheus.Gauge
+	// Redelivered is the signal that a fanout is outrunning its ack deadline,
+	// which is the failure mode that turns slow into catastrophic.
+	Redelivered prometheus.Gauge
 }
 
 // NewMetrics registers the worker's instruments.
@@ -79,12 +100,20 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 			Namespace: "murmur", Subsystem: "fanout", Name: "events_total",
 			Help: "Events handled, by outcome.",
 		}, []string{"outcome"}),
-		Pending: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: "murmur", Subsystem: "fanout", Name: "consumer_pending",
-			Help: "Messages waiting on the durable consumer.",
+		Routed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "murmur", Subsystem: "fanout", Name: "routed_total",
+			Help: "Posts by fanout mode and author size.",
+		}, []string{"mode", "bucket"}),
+		Outstanding: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "murmur", Subsystem: "fanout", Name: "consumer_outstanding",
+			Help: "Messages the consumer still owes: undelivered plus in flight.",
+		}),
+		Redelivered: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "murmur", Subsystem: "fanout", Name: "consumer_redelivered",
+			Help: "Messages currently being redelivered after a missed acknowledgement.",
 		}),
 	}
-	registry.MustRegister(m.Duration, m.Followers, m.Events, m.Pending)
+	registry.MustRegister(m.Duration, m.Followers, m.Events, m.Routed, m.Outstanding, m.Redelivered)
 	return m
 }
 
@@ -110,6 +139,7 @@ type Worker struct {
 	js       jetstream.JetStream
 	social   socialv1.SocialServiceClient
 	timeline *timeline.Store
+	router   *Router
 	opts     Options
 }
 
@@ -130,7 +160,14 @@ func New(
 	if opts.MaxDeliver <= 0 {
 		opts.MaxDeliver = 5
 	}
-	return &Worker{consumer: consumer, js: js, social: social, timeline: timelines, opts: opts}
+	return &Worker{
+		consumer: consumer,
+		js:       js,
+		social:   social,
+		timeline: timelines,
+		router:   NewRouter(social, opts.Threshold, opts.RouteCacheTTL, nil),
+		opts:     opts,
+	}
 }
 
 // Component returns the worker as a lifecycle component.
@@ -147,7 +184,8 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.opts.Log.Info("fanout worker started",
 		"concurrency", w.opts.Concurrency,
 		"follower_page", w.opts.FollowerPage,
-		"timeline_cap", w.timeline.Cap())
+		"timeline_cap", w.timeline.Cap(),
+		"threshold", w.router.Threshold())
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.SetLimit(w.opts.Concurrency)
@@ -255,10 +293,48 @@ func (w *Worker) handle(ctx context.Context, msg jetstream.Msg) {
 		"duration_ms", float64(elapsed.Microseconds())/1000)
 }
 
-// fanout writes the post into every follower's timeline, a page at a time.
-// It returns how many timelines were written.
+// fanout materialises one post, by whichever route its author's size calls
+// for. It returns how many follower timelines were written.
 func (w *Worker) fanout(ctx context.Context, event *eventsv1.PostCreated) (int, error) {
 	score := event.GetCreatedAt().AsTime().UnixMilli()
+
+	// The author's own feed is written for every post regardless of mode.
+	//
+	// It costs one ZADD whatever the follower count, and it buys the two
+	// transitions for free. An account crossing the threshold upward needs no
+	// backfill, because its recent posts are already here for readers to merge.
+	// An account crossing back down is safe for the same reason: the posts it
+	// published while heavy are recoverable rather than stranded.
+	if err := w.timeline.PushAuthor(ctx, event.GetAuthorId(), event.GetPostId(), score); err != nil {
+		return 0, err
+	}
+
+	mode, followers, err := w.router.Route(ctx, event.GetAuthorId())
+	if err != nil {
+		return 0, fmt.Errorf("route post %s: %w", event.GetPostId(), err)
+	}
+
+	if w.opts.Metrics != nil {
+		w.opts.Metrics.Routed.WithLabelValues(string(mode), followerBucket(int(followers))).Inc()
+	}
+
+	if mode == ModePull {
+		// Deliberately nothing. This is the entire cutover: an account above
+		// the threshold stops paying N writes per post, and its readers pay a
+		// merge instead. The post is already in the author's feed above, so
+		// every follower will see it on their next read.
+		w.opts.Log.Debug("post routed to pull",
+			"post_id", event.GetPostId(),
+			"author_id", event.GetAuthorId(),
+			"followers", followers)
+		return 0, nil
+	}
+
+	return w.push(ctx, event, score)
+}
+
+// push writes the post into every follower's timeline, a page at a time.
+func (w *Worker) push(ctx context.Context, event *eventsv1.PostCreated, score int64) (int, error) {
 	cursor := ""
 	written := 0
 
@@ -325,7 +401,7 @@ func (w *Worker) countEvent(outcome string) {
 	}
 }
 
-// pollPending keeps the consumer-lag gauge current.
+// pollPending keeps the consumer-lag gauges current.
 //
 // Lag is the number that says whether the fanout is keeping up with the
 // writes, and it is the signal phase 8 scales the worker pool on.
@@ -348,6 +424,7 @@ func (w *Worker) pollPending(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		w.opts.Metrics.Pending.Set(float64(info.NumPending))
+		w.opts.Metrics.Outstanding.Set(float64(info.NumPending) + float64(info.NumAckPending))
+		w.opts.Metrics.Redelivered.Set(float64(info.NumRedelivered))
 	}
 }

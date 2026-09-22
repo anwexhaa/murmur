@@ -47,6 +47,7 @@ type options struct {
 	writers        int
 	reset          bool
 	skipEvents     bool
+	statsOnly      bool
 	zipfSkew       float64
 	progressEvery  time.Duration
 }
@@ -69,11 +70,12 @@ func run() error {
 	flag.IntVar(&opt.writers, "writers", 4, "concurrent COPY workers")
 	flag.BoolVar(&opt.reset, "reset", false, "truncate every table first")
 	flag.BoolVar(&opt.skipEvents, "skip-events", false, "do not write outbox events for seeded posts (they will never reach a timeline)")
+	flag.BoolVar(&opt.statsOnly, "stats-only", false, "seed nothing; just rebuild author_stats from the follow edges")
 	flag.Float64Var(&opt.zipfSkew, "skew", 1.2, "Zipf exponent; higher concentrates followers on fewer accounts")
 	flag.DurationVar(&opt.progressEvery, "progress", 5*time.Second, "how often to log progress")
 	flag.Parse()
 
-	if opt.whaleFollowers >= opt.users {
+	if opt.whaleFollowers > 0 && opt.whaleFollowers >= opt.users {
 		return fmt.Errorf("-whale-followers (%d) must be below -users (%d): a whale needs other accounts to follow it",
 			opt.whaleFollowers, opt.users)
 	}
@@ -102,6 +104,13 @@ func run() error {
 
 	started := time.Now()
 
+	// Rebuilding the counters is also an operational action, not only the tail
+	// of a seed: any maintained counter can drift, and a counter with no way to
+	// repair it is a counter nobody should trust.
+	if opt.statsOnly {
+		return recomputeStats(ctx, log, store)
+	}
+
 	users, err := seedUsers(ctx, log, store, opt)
 	if err != nil {
 		return err
@@ -112,6 +121,13 @@ func run() error {
 	}
 	posts, err := seedPosts(ctx, log, store, opt, users)
 	if err != nil {
+		return err
+	}
+
+	// COPY bypasses the incremental counter maintenance entirely, so the
+	// counts are rebuilt in one pass. Doing it row by row through a
+	// two-million-edge load would take longer than the load itself.
+	if err := recomputeStats(ctx, log, store); err != nil {
 		return err
 	}
 
@@ -126,6 +142,29 @@ func run() error {
 	// that produced the right number of edges but a flat distribution has not
 	// produced a useful dataset.
 	return reportDistribution(ctx, log, store)
+}
+
+// recomputeStats rebuilds every follower count from the edges, and reports
+// whether the incremental path had drifted.
+func recomputeStats(ctx context.Context, log *slog.Logger, store *social.Store) error {
+	log.Info("recomputing author stats")
+	started := time.Now()
+
+	rows, err := store.RecomputeAuthorStats(ctx)
+	if err != nil {
+		return err
+	}
+
+	drift, err := store.AuthorStatsDrift(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Info("author stats recomputed",
+		"rows", rows,
+		"drift_repaired", drift,
+		"duration", time.Since(started).Round(time.Millisecond))
+	return nil
 }
 
 // ---------------------------------------------------------------- users

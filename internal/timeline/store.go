@@ -268,3 +268,99 @@ func (s *Store) Clear(ctx context.Context, userIDs ...string) error {
 	}
 	return nil
 }
+
+// AuthorCap is how many recent posts an author's own feed keeps.
+//
+// Smaller than a timeline cap because this exists only to satisfy read-time
+// merging: a reader assembling one page needs at most a page of posts from any
+// single author, and deep history lives in Postgres.
+const AuthorCap = 200
+
+// AuthorKey returns the Redis key holding one author's recent posts.
+func AuthorKey(authorID string) string { return "author:" + authorID + ":recent" }
+
+// PushAuthor records a post in its author's own recent feed.
+//
+// Written for every post, not only for heavy authors. It costs one ZADD
+// regardless of follower count, and it buys two things that would otherwise be
+// expensive: an author crossing the threshold upward needs no backfill,
+// because their recent posts are already here; and an author crossing back
+// down is safe, because the posts pushed during their heavy period can be
+// reconstructed from this feed rather than being lost.
+func (s *Store) PushAuthor(ctx context.Context, authorID, postID string, score int64) error {
+	if err := s.ensureLoaded(ctx); err != nil {
+		return err
+	}
+
+	run := func() error {
+		return s.client.EvalSha(ctx, s.push.Hash(),
+			[]string{AuthorKey(authorID)},
+			strconv.Itoa(AuthorCap), strconv.FormatInt(score, 10), postID).Err()
+	}
+
+	err := run()
+	if err != nil && isNoScript(err) {
+		s.forget()
+		if loadErr := s.ensureLoaded(ctx); loadErr != nil {
+			return loadErr
+		}
+		err = run()
+	}
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return fmt.Errorf("push author feed %s: %w", authorID, err)
+	}
+	return nil
+}
+
+// RangeAuthor returns an author's recent post IDs, newest first.
+func (s *Store) RangeAuthor(ctx context.Context, authorID string, limit int) ([]string, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	ids, err := s.client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:   AuthorKey(authorID),
+		Start: 0,
+		Stop:  int64(limit - 1),
+		Rev:   true,
+	}).Result()
+	if err != nil {
+		return nil, fmt.Errorf("read author feed %s: %w", authorID, err)
+	}
+	return ids, nil
+}
+
+// RangeAuthors reads several authors' feeds in one pipeline.
+//
+// The read path calls this once per request with every heavy account the
+// viewer follows. Pipelined rather than looped: the whole point of the pull
+// side is that it costs one round trip no matter how many heavy accounts a
+// viewer follows.
+func (s *Store) RangeAuthors(ctx context.Context, authorIDs []string, limit int) ([][]string, error) {
+	if len(authorIDs) == 0 || limit <= 0 {
+		return nil, nil
+	}
+
+	pipe := s.client.Pipeline()
+	cmds := make([]*redis.StringSliceCmd, len(authorIDs))
+	for i, id := range authorIDs {
+		cmds[i] = pipe.ZRangeArgs(ctx, redis.ZRangeArgs{
+			Key:   AuthorKey(id),
+			Start: 0,
+			Stop:  int64(limit - 1),
+			Rev:   true,
+		})
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("read %d author feeds: %w", len(authorIDs), err)
+	}
+
+	streams := make([][]string, 0, len(authorIDs))
+	for _, cmd := range cmds {
+		ids, err := cmd.Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return nil, fmt.Errorf("read author feed: %w", err)
+		}
+		streams = append(streams, ids)
+	}
+	return streams, nil
+}

@@ -50,6 +50,14 @@ type Config struct {
 	FanoutAckWait      time.Duration
 	OutboxBatch        int
 	OutboxInterval     time.Duration
+
+	// FanoutThreshold is the follower count at or above which a post stops
+	// being pushed to follower timelines and is merged in at read time
+	// instead. Zero pushes everything. The default is the crossover the
+	// phase 4 benchmark measured — see docs/adr-001-fanout-threshold.md.
+	FanoutThreshold int64
+	RouteCacheTTL   time.Duration
+	HeavySetRefresh time.Duration
 }
 
 // Postgres holds the source-of-truth database settings.
@@ -120,6 +128,10 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		FanoutAckWait:  p.dur("FANOUT_ACK_WAIT", 60*time.Second),
 		OutboxBatch:    p.num("OUTBOX_BATCH", 100),
 		OutboxInterval: p.dur("OUTBOX_INTERVAL", 250*time.Millisecond),
+
+		FanoutThreshold: int64(p.num("FANOUT_THRESHOLD", 10_000)),
+		RouteCacheTTL:   p.dur("ROUTE_CACHE_TTL", 30*time.Second),
+		HeavySetRefresh: p.dur("HEAVY_SET_REFRESH", 15*time.Second),
 
 		Postgres: Postgres{
 			DSN:            p.str("POSTGRES_DSN", "postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable"),

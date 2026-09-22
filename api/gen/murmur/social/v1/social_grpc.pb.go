@@ -29,6 +29,8 @@ const (
 	SocialService_GetFollowerCount_FullMethodName       = "/murmur.social.v1.SocialService/GetFollowerCount"
 	SocialService_BatchGetFollowerCounts_FullMethodName = "/murmur.social.v1.SocialService/BatchGetFollowerCounts"
 	SocialService_IsFollowing_FullMethodName            = "/murmur.social.v1.SocialService/IsFollowing"
+	SocialService_ListHeavyAuthors_FullMethodName       = "/murmur.social.v1.SocialService/ListHeavyAuthors"
+	SocialService_FilterFollowing_FullMethodName        = "/murmur.social.v1.SocialService/FilterFollowing"
 	SocialService_CreatePost_FullMethodName             = "/murmur.social.v1.SocialService/CreatePost"
 	SocialService_GetPost_FullMethodName                = "/murmur.social.v1.SocialService/GetPost"
 	SocialService_BatchGetPosts_FullMethodName          = "/murmur.social.v1.SocialService/BatchGetPosts"
@@ -67,6 +69,8 @@ type SocialServiceClient interface {
 	GetFollowerCount(ctx context.Context, in *GetFollowerCountRequest, opts ...grpc.CallOption) (*GetFollowerCountResponse, error)
 	BatchGetFollowerCounts(ctx context.Context, in *BatchGetFollowerCountsRequest, opts ...grpc.CallOption) (*BatchGetFollowerCountsResponse, error)
 	IsFollowing(ctx context.Context, in *IsFollowingRequest, opts ...grpc.CallOption) (*IsFollowingResponse, error)
+	ListHeavyAuthors(ctx context.Context, in *ListHeavyAuthorsRequest, opts ...grpc.CallOption) (*ListHeavyAuthorsResponse, error)
+	FilterFollowing(ctx context.Context, in *FilterFollowingRequest, opts ...grpc.CallOption) (*FilterFollowingResponse, error)
 	// Posts.
 	CreatePost(ctx context.Context, in *CreatePostRequest, opts ...grpc.CallOption) (*CreatePostResponse, error)
 	GetPost(ctx context.Context, in *GetPostRequest, opts ...grpc.CallOption) (*GetPostResponse, error)
@@ -182,6 +186,26 @@ func (c *socialServiceClient) IsFollowing(ctx context.Context, in *IsFollowingRe
 	return out, nil
 }
 
+func (c *socialServiceClient) ListHeavyAuthors(ctx context.Context, in *ListHeavyAuthorsRequest, opts ...grpc.CallOption) (*ListHeavyAuthorsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListHeavyAuthorsResponse)
+	err := c.cc.Invoke(ctx, SocialService_ListHeavyAuthors_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *socialServiceClient) FilterFollowing(ctx context.Context, in *FilterFollowingRequest, opts ...grpc.CallOption) (*FilterFollowingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FilterFollowingResponse)
+	err := c.cc.Invoke(ctx, SocialService_FilterFollowing_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *socialServiceClient) CreatePost(ctx context.Context, in *CreatePostRequest, opts ...grpc.CallOption) (*CreatePostResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreatePostResponse)
@@ -254,6 +278,8 @@ type SocialServiceServer interface {
 	GetFollowerCount(context.Context, *GetFollowerCountRequest) (*GetFollowerCountResponse, error)
 	BatchGetFollowerCounts(context.Context, *BatchGetFollowerCountsRequest) (*BatchGetFollowerCountsResponse, error)
 	IsFollowing(context.Context, *IsFollowingRequest) (*IsFollowingResponse, error)
+	ListHeavyAuthors(context.Context, *ListHeavyAuthorsRequest) (*ListHeavyAuthorsResponse, error)
+	FilterFollowing(context.Context, *FilterFollowingRequest) (*FilterFollowingResponse, error)
 	// Posts.
 	CreatePost(context.Context, *CreatePostRequest) (*CreatePostResponse, error)
 	GetPost(context.Context, *GetPostRequest) (*GetPostResponse, error)
@@ -298,6 +324,12 @@ func (UnimplementedSocialServiceServer) BatchGetFollowerCounts(context.Context, 
 }
 func (UnimplementedSocialServiceServer) IsFollowing(context.Context, *IsFollowingRequest) (*IsFollowingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method IsFollowing not implemented")
+}
+func (UnimplementedSocialServiceServer) ListHeavyAuthors(context.Context, *ListHeavyAuthorsRequest) (*ListHeavyAuthorsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListHeavyAuthors not implemented")
+}
+func (UnimplementedSocialServiceServer) FilterFollowing(context.Context, *FilterFollowingRequest) (*FilterFollowingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FilterFollowing not implemented")
 }
 func (UnimplementedSocialServiceServer) CreatePost(context.Context, *CreatePostRequest) (*CreatePostResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreatePost not implemented")
@@ -512,6 +544,42 @@ func _SocialService_IsFollowing_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SocialService_ListHeavyAuthors_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListHeavyAuthorsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SocialServiceServer).ListHeavyAuthors(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SocialService_ListHeavyAuthors_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SocialServiceServer).ListHeavyAuthors(ctx, req.(*ListHeavyAuthorsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SocialService_FilterFollowing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FilterFollowingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SocialServiceServer).FilterFollowing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SocialService_FilterFollowing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SocialServiceServer).FilterFollowing(ctx, req.(*FilterFollowingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SocialService_CreatePost_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreatePostRequest)
 	if err := dec(in); err != nil {
@@ -630,6 +698,14 @@ var SocialService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "IsFollowing",
 			Handler:    _SocialService_IsFollowing_Handler,
+		},
+		{
+			MethodName: "ListHeavyAuthors",
+			Handler:    _SocialService_ListHeavyAuthors_Handler,
+		},
+		{
+			MethodName: "FilterFollowing",
+			Handler:    _SocialService_FilterFollowing_Handler,
 		},
 		{
 			MethodName: "CreatePost",

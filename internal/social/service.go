@@ -30,6 +30,14 @@ const (
 	// larger than a human-facing page for a reason: it is walking follower
 	// edges by the hundred thousand, and every page is a round trip.
 	FanoutPageSize = 1000
+
+	// MaxHeavyAuthors caps the pull side of the hybrid read path.
+	//
+	// The heavy set is small by construction — that is what the top of a power
+	// law means — and this cap is the backstop that keeps it small if the
+	// threshold is ever misconfigured downward. Without it, a threshold of 1
+	// would turn every read into a merge across every account in the system.
+	MaxHeavyAuthors = 2000
 )
 
 // Service implements the SocialService gRPC contract over the store.
@@ -124,7 +132,7 @@ func (s *Service) Follow(ctx context.Context, req *socialv1.FollowRequest) (*soc
 		return nil, toStatus(err)
 	}
 
-	created, err := s.store.Follow(ctx, follower, followee)
+	created, err := s.store.FollowWithStats(ctx, follower, followee)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -137,7 +145,7 @@ func (s *Service) Unfollow(ctx context.Context, req *socialv1.UnfollowRequest) (
 		return nil, toStatus(err)
 	}
 
-	removed, err := s.store.Unfollow(ctx, follower, followee)
+	removed, err := s.store.UnfollowWithStats(ctx, follower, followee)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -186,7 +194,7 @@ func (s *Service) GetFollowerCount(ctx context.Context, req *socialv1.GetFollowe
 		return nil, toStatus(err)
 	}
 
-	count, err := s.store.CountFollowers(ctx, id)
+	count, err := s.store.GetFollowerCountFast(ctx, id)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -217,6 +225,51 @@ func (s *Service) BatchGetFollowerCounts(ctx context.Context, req *socialv1.Batc
 		out[id.String()] = count
 	}
 	return &socialv1.BatchGetFollowerCountsResponse{Followers: out}, nil
+}
+
+// ListHeavyAuthors backs the read path's pull side. The threshold arrives
+// from the caller rather than from server configuration, so the benchmark that
+// chooses it can sweep values without a redeploy per data point.
+func (s *Service) ListHeavyAuthors(ctx context.Context, req *socialv1.ListHeavyAuthorsRequest) (*socialv1.ListHeavyAuthorsResponse, error) {
+	if req.GetThreshold() < 0 {
+		return nil, status.Error(codes.InvalidArgument, "threshold must not be negative")
+	}
+
+	limit := int(req.GetLimit())
+	if limit <= 0 || limit > MaxHeavyAuthors {
+		limit = MaxHeavyAuthors
+	}
+
+	ids, err := s.store.ListHeavyAuthors(ctx, req.GetThreshold(), limit)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &socialv1.ListHeavyAuthorsResponse{UserIds: uuidStrings(ids)}, nil
+}
+
+func (s *Service) FilterFollowing(ctx context.Context, req *socialv1.FilterFollowingRequest) (*socialv1.FilterFollowingResponse, error) {
+	follower, err := domain.ParseUserID("follower_id", req.GetFollowerId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	if len(req.GetCandidateIds()) > MaxHeavyAuthors {
+		return nil, status.Errorf(codes.InvalidArgument, "at most %d candidates", MaxHeavyAuthors)
+	}
+
+	candidates := make([]uuid.UUID, 0, len(req.GetCandidateIds()))
+	for _, raw := range req.GetCandidateIds() {
+		id, parseErr := domain.ParseUserID("candidate_ids", raw)
+		if parseErr != nil {
+			return nil, toStatus(parseErr)
+		}
+		candidates = append(candidates, id)
+	}
+
+	followed, err := s.store.FilterFollowing(ctx, follower, candidates)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &socialv1.FilterFollowingResponse{FolloweeIds: uuidStrings(followed)}, nil
 }
 
 func (s *Service) IsFollowing(ctx context.Context, req *socialv1.IsFollowingRequest) (*socialv1.IsFollowingResponse, error) {

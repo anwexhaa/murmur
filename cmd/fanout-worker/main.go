@@ -97,12 +97,14 @@ func run() error {
 		socialv1.NewSocialServiceClient(social),
 		timeline.NewStore(redis, cfg.TimelineCap),
 		fanout.Options{
-			Concurrency:  cfg.FanoutConcurrency,
-			FollowerPage: cfg.FanoutFollowerPage,
-			MaxDeliver:   cfg.FanoutMaxDeliver,
-			AckWait:      cfg.FanoutAckWait,
-			Log:          log,
-			Metrics:      fanout.NewMetrics(registry),
+			Concurrency:   cfg.FanoutConcurrency,
+			FollowerPage:  cfg.FanoutFollowerPage,
+			MaxDeliver:    cfg.FanoutMaxDeliver,
+			AckWait:       cfg.FanoutAckWait,
+			Threshold:     cfg.FanoutThreshold,
+			RouteCacheTTL: cfg.RouteCacheTTL,
+			Log:           log,
+			Metrics:       fanout.NewMetrics(registry),
 		})
 
 	checks := health.New(2 * time.Second)

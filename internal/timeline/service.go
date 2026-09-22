@@ -33,12 +33,96 @@ type Service struct {
 
 	store  *Store
 	social socialv1.SocialServiceClient
+	heavy  *HeavySet
 	log    *slog.Logger
 }
 
-// NewService wires a service.
-func NewService(store *Store, social socialv1.SocialServiceClient, log *slog.Logger) *Service {
-	return &Service{store: store, social: social, log: log}
+// NewService wires a service. A nil heavy set disables the pull side, which is
+// the phase 3 behaviour.
+func NewService(store *Store, social socialv1.SocialServiceClient, heavy *HeavySet, log *slog.Logger) *Service {
+	return &Service{store: store, social: social, heavy: heavy, log: log}
+}
+
+// assemble reads the viewer's timeline and merges in the heavy accounts they
+// follow.
+//
+// The pushed timeline is one stream; each heavy account the viewer follows is
+// another. Merged, they are indistinguishable from a timeline that had been
+// fully materialised — which is the requirement, because the push/pull split
+// is a cost decision and a reader must not be able to tell.
+//
+// Cost: one Redis range, one gRPC call to find which heavy accounts this
+// viewer follows, and one pipelined Redis read covering all of them. It does
+// not grow with how many accounts the viewer follows, only with how many
+// *heavy* accounts they follow — which is bounded by the size of the heavy set
+// and, in a power law, is a handful.
+func (s *Service) assemble(ctx context.Context, userID, pageToken string, limit int) ([]string, error) {
+	pushed, err := s.store.Range(ctx, userID, pageToken, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	heavyIDs := s.followedHeavyAuthors(ctx, userID)
+	if len(heavyIDs) == 0 {
+		return pushed, nil
+	}
+
+	// Over-fetch from each author feed. A single heavy account could supply
+	// the whole page, so each has to offer enough to fill it.
+	streams, err := s.store.RangeAuthors(ctx, heavyIDs, limit)
+	if err != nil {
+		// The pull side failing must not fail the read. A timeline missing a
+		// heavy account's posts is worse than complete and far better than an
+		// error page, and it repairs itself on the next request.
+		s.log.Warn("could not read author feeds; serving the pushed timeline only",
+			"user_id", userID, "heavy_authors", len(heavyIDs), "error", err)
+		return pushed, nil
+	}
+
+	merged := MergeNewestFirst(append([][]string{pushed}, streams...), limit)
+
+	// A cursor page must not re-show what the caller already has. The pushed
+	// stream was already cut at the cursor by Range; the author feeds were not,
+	// because they are read by rank rather than by cursor.
+	if pageToken != "" {
+		filtered := merged[:0]
+		for _, id := range merged {
+			if id < pageToken {
+				filtered = append(filtered, id)
+			}
+		}
+		merged = filtered
+	}
+
+	return merged, nil
+}
+
+// followedHeavyAuthors returns the heavy accounts this viewer follows.
+//
+// Returns nothing rather than failing on error: the pull side is an
+// optimisation to the read path, and a timeline that is briefly missing one
+// account's posts is a far better outcome than a timeline that is missing
+// entirely.
+func (s *Service) followedHeavyAuthors(ctx context.Context, userID string) []string {
+	if s.heavy == nil || !s.heavy.Enabled() {
+		return nil
+	}
+
+	candidates := s.heavy.IDs()
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	resp, err := s.social.FilterFollowing(ctx, &socialv1.FilterFollowingRequest{
+		FollowerId:   userID,
+		CandidateIds: candidates,
+	})
+	if err != nil {
+		s.log.Warn("could not resolve followed heavy authors; serving the pushed timeline only",
+			"user_id", userID, "error", err)
+		return nil
+	}
+	return resp.GetFolloweeIds()
 }
 
 func (s *Service) GetTimeline(ctx context.Context, req *timelinev1.GetTimelineRequest) (*timelinev1.GetTimelineResponse, error) {
@@ -54,7 +138,7 @@ func (s *Service) GetTimeline(ctx context.Context, req *timelinev1.GetTimelineRe
 
 	limit := clampPageSize(req.GetPageSize())
 
-	ids, err := s.store.Range(ctx, userID.String(), req.GetPageToken(), limit)
+	ids, err := s.assemble(ctx, userID.String(), req.GetPageToken(), limit)
 	if err != nil {
 		s.log.Error("reading timeline", "user_id", userID, "error", err)
 		return nil, status.Error(codes.Internal, "could not read the timeline")

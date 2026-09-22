@@ -111,8 +111,25 @@ type fakeSocial struct {
 	// failUntil makes the first N calls fail, to drive the retry path.
 	failUntil int
 
+	// followerCount is what the router sees. Zero keeps every post on the
+	// push path, which is what these tests are about; the routing decision
+	// itself is covered in router_test.go without any infrastructure.
+	followerCount int64
+
 	mu    sync.Mutex
 	calls int
+}
+
+// GetFollowerCount serves the router. The worker asks per post from phase 4,
+// so a fake that does not answer it panics on a nil embedded client.
+func (f *fakeSocial) GetFollowerCount(
+	_ context.Context,
+	_ *socialv1.GetFollowerCountRequest,
+	_ ...grpc.CallOption,
+) (*socialv1.GetFollowerCountResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return &socialv1.GetFollowerCountResponse{Followers: f.followerCount}, nil
 }
 
 func (f *fakeSocial) callCount() int {
