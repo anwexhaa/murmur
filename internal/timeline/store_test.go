@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"testing"
@@ -75,6 +77,11 @@ func testRedisDB() int {
 		}
 	}
 	return 1
+}
+
+// quietTestLogger keeps test output to test failures.
+func quietTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func newStore(t *testing.T, capacity int) *timeline.Store {

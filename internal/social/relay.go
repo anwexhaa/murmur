@@ -223,6 +223,8 @@ func subjectFor(t EventType) (string, bool) {
 	switch t {
 	case PostCreatedType:
 		return bus.SubjectPostCreated, true
+	case PostDeletedType:
+		return bus.SubjectPostDeleted, true
 	default:
 		return "", false
 	}

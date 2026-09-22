@@ -78,7 +78,7 @@ func TestInstrumentAttachesRequestIDAndEchoesIt(t *testing.T) {
 	var seen string
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = grpcx.RequestID(r.Context())
-	}), metrics, quietLogger(), time.Second)
+	}), nil, metrics, quietLogger(), time.Second)
 
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/query", nil))
@@ -100,7 +100,7 @@ func TestInstrumentAdoptsACallerSuppliedRequestID(t *testing.T) {
 	var seen string
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = grpcx.RequestID(r.Context())
-	}), metrics, quietLogger(), time.Second)
+	}), nil, metrics, quietLogger(), time.Second)
 
 	req := httptest.NewRequest(http.MethodPost, "/query", nil)
 	req.Header.Set(grpcx.RequestIDKey, supplied)
@@ -118,7 +118,7 @@ func TestInstrumentCarriesTheViewer(t *testing.T) {
 	var seen string
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = Viewer(r.Context())
-	}), metrics, quietLogger(), time.Second)
+	}), nil, metrics, quietLogger(), time.Second)
 
 	req := httptest.NewRequest(http.MethodPost, "/query", nil)
 	req.Header.Set(ViewerHeader, viewer)
@@ -135,7 +135,7 @@ func TestInstrumentLeavesViewerEmptyWhenNoHeader(t *testing.T) {
 	seen := "not-called"
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = Viewer(r.Context())
-	}), metrics, quietLogger(), time.Second)
+	}), nil, metrics, quietLogger(), time.Second)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -153,7 +153,7 @@ func TestInstrumentImposesADeadline(t *testing.T) {
 	var hasDeadline bool
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		deadline, hasDeadline = r.Context().Deadline()
-	}), metrics, quietLogger(), 250*time.Millisecond)
+	}), nil, metrics, quietLogger(), 250*time.Millisecond)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -175,7 +175,7 @@ func TestInstrumentRecordsTheDownstreamCallCount(t *testing.T) {
 		for range 163 {
 			counter.Record("/murmur.social.v1.SocialService/GetUser")
 		}
-	}), metrics, quietLogger(), time.Second)
+	}), nil, metrics, quietLogger(), time.Second)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -194,7 +194,7 @@ func TestOperationLabelComesFromTheParsedQuery(t *testing.T) {
 
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		RecordOperationName(r.Context(), "UserProfile")
-	}), metrics, quietLogger(), time.Second)
+	}), nil, metrics, quietLogger(), time.Second)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -209,7 +209,7 @@ func TestUnnamedOperationsShareOneLabel(t *testing.T) {
 	metrics, registry := newTestMetrics(t)
 
 	handler := Instrument(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
-		metrics, quietLogger(), time.Second)
+		nil, metrics, quietLogger(), time.Second)
 
 	for range 3 {
 		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
@@ -226,7 +226,7 @@ func TestInstrumentRecordsTheStatusCode(t *testing.T) {
 	handler := Instrument(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 		_, _ = io.WriteString(w, "nope")
-	}), metrics, quietLogger(), time.Second)
+	}), nil, metrics, quietLogger(), time.Second)
 
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/query", nil))

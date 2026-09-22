@@ -394,6 +394,31 @@ func (s *Service) ListAuthorPosts(ctx context.Context, req *socialv1.ListAuthorP
 	return &socialv1.ListAuthorPostsResponse{Posts: out, NextPageToken: token}, nil
 }
 
+func (s *Service) DeletePost(ctx context.Context, req *socialv1.DeletePostRequest) (*socialv1.DeletePostResponse, error) {
+	if err := domain.ValidatePostID("id", req.GetId()); err != nil {
+		return nil, toStatus(err)
+	}
+	actor, err := domain.ParseUserID("actor_id", req.GetActorId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+
+	payload, err := proto.Marshal(&eventsv1.PostDeleted{
+		PostId:    req.GetId(),
+		AuthorId:  actor.String(),
+		DeletedAt: timestamppb.New(s.now()),
+	})
+	if err != nil {
+		return nil, status.Error(codes.Internal, "could not encode the delete event")
+	}
+
+	deleted, err := s.store.DeletePostWithEvent(ctx, req.GetId(), actor, payload)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &socialv1.DeletePostResponse{Deleted: deleted}, nil
+}
+
 // --------------------------------------------------------------- shared
 
 func (s *Service) edge(followerRaw, followeeRaw string) (uuid.UUID, uuid.UUID, error) {
@@ -463,6 +488,8 @@ func toStatus(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, domain.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, domain.ErrForbidden):
+		return status.Error(codes.PermissionDenied, err.Error())
 	case errors.Is(err, context.Canceled):
 		return status.Error(codes.Canceled, "request cancelled")
 	case errors.Is(err, context.DeadlineExceeded):

@@ -23,6 +23,10 @@ var (
 	ErrNotFound      = errors.New("not found")
 	ErrAlreadyExists = errors.New("already exists")
 	ErrInvalid       = errors.New("invalid argument")
+	// ErrForbidden is distinct from ErrNotFound on purpose: "this is not
+	// yours" and "this does not exist" are different facts, and collapsing
+	// them would make an owner's mistake indistinguishable from a typo.
+	ErrForbidden = errors.New("forbidden")
 )
 
 // User is an account. Handles are case-insensitive: the column is citext, so

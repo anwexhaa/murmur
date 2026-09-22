@@ -187,3 +187,9 @@ func requireViewer(ctx context.Context) (string, error) {
 	}
 	return viewer, nil
 }
+
+// errNoLoaders means a resolver ran outside a request that built loaders,
+// which can only happen if the middleware was not wired. It is an internal
+// error rather than a fallback to unbatched calls: silently falling back would
+// restore the N+1 and hide it, and the whole project is about not doing that.
+var errNoLoaders = status.Error(codes.Internal, "no per-request loaders in context")

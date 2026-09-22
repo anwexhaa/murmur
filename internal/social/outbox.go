@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -208,4 +209,68 @@ func (s *Store) CopyOutbox(ctx context.Context, records []OutboxRecord) (int64, 
 		return n, fmt.Errorf("copy outbox: %w", err)
 	}
 	return n, nil
+}
+
+// PostDeletedType is published when a post is removed, so caches forget it.
+const PostDeletedType EventType = "post.deleted"
+
+// DeletePostWithEvent soft-deletes a post and records the event atomically.
+//
+// Soft delete, not a row removal: the post ID is already sitting in hundreds
+// of thousands of Redis timelines, and the read path skips IDs it cannot
+// hydrate. Removing the row would leave those entries as permanent silent
+// gaps; marking it deleted lets the read path recognise them.
+//
+// Returns false when the post was already deleted, which makes a retried
+// delete succeed rather than surprise the caller.
+func (s *Store) DeletePostWithEvent(ctx context.Context, postID string, actor uuid.UUID, payload []byte) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// The author check is in the UPDATE rather than a separate SELECT, so
+	// there is no window between reading the owner and acting on it.
+	var author uuid.UUID
+	err = tx.QueryRow(ctx,
+		`UPDATE posts SET deleted_at = now()
+		 WHERE id = $1 AND author_id = $2 AND deleted_at IS NULL
+		 RETURNING author_id`, postID, actor).Scan(&author)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Either it does not exist, or it is already deleted, or the caller is
+		// not the author. These are distinguished below rather than collapsed,
+		// because "not yours" and "not there" call for different responses.
+		var owner uuid.UUID
+		var deleted *time.Time
+		lookupErr := s.pool.QueryRow(ctx,
+			`SELECT author_id, deleted_at FROM posts WHERE id = $1`, postID).Scan(&owner, &deleted)
+		switch {
+		case errors.Is(lookupErr, pgx.ErrNoRows):
+			return false, fmt.Errorf("%w: post %s", domain.ErrNotFound, postID)
+		case lookupErr != nil:
+			return false, fmt.Errorf("look up post: %w", lookupErr)
+		case owner != actor:
+			return false, fmt.Errorf("%w: only the author may delete a post", domain.ErrForbidden)
+		default:
+			// Already deleted. Idempotent success.
+			return false, nil
+		}
+	}
+	if err != nil {
+		return false, fmt.Errorf("delete post: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO outbox (aggregate_id, type, payload) VALUES ($1, $2, $3)`,
+		postID, string(PostDeletedType), payload)
+	if err != nil {
+		return false, fmt.Errorf("insert delete event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit delete: %w", err)
+	}
+	return true, nil
 }

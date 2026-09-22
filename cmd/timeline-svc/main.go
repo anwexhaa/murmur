@@ -18,6 +18,7 @@ import (
 
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
 	timelinev1 "github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1"
+	"github.com/anwexhaa/murmur/internal/platform/bus"
 	"github.com/anwexhaa/murmur/internal/platform/config"
 	"github.com/anwexhaa/murmur/internal/platform/grpcx"
 	"github.com/anwexhaa/murmur/internal/platform/health"
@@ -73,18 +74,42 @@ func run() error {
 	}
 	defer func() { _ = social.Close() }()
 
+	events, closeBus, err := bus.Open(ctx, cfg.NATS, log)
+	if err != nil {
+		return fmt.Errorf("nats: %w", err)
+	}
+	defer closeBus()
+	if err := bus.EnsureStreams(ctx, events.JS); err != nil {
+		return err
+	}
+
 	registry := metrics.New()
 	socialClient := socialv1.NewSocialServiceClient(social)
 	heavy := timeline.NewHeavySet(socialClient, cfg.FanoutThreshold, cfg.HeavySetRefresh, log)
+
+	cache, err := timeline.NewPostCache(redis, socialClient, timeline.CacheOptions{
+		LocalEntries: cfg.PostCacheEntries,
+		LocalTTL:     cfg.PostCacheLocalTTL,
+		RedisTTL:     cfg.PostCacheRedisTTL,
+		Log:          log,
+		Metrics:      timeline.NewCacheMetrics(registry),
+	})
+	if err != nil {
+		return err
+	}
+	invalidator := timeline.NewInvalidator(events, cache, log)
+
 	service := timeline.NewService(
 		timeline.NewStore(redis, cfg.TimelineCap),
 		socialClient,
 		heavy,
+		cache,
 		log,
 	)
 
 	checks := health.New(2 * time.Second)
 	checks.Register("redis", func(ctx context.Context) error { return redis.Ping(ctx).Err() })
+	checks.Register("nats", events.Healthy)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.LiveHandler())
@@ -93,6 +118,7 @@ func run() error {
 
 	return lifecycle.Run(ctx, log, cfg.ShutdownTimeout,
 		lifecycle.Component{Name: "heavy-set", Start: heavy.Run},
+		lifecycle.Component{Name: "cache-invalidator", Start: invalidator.Run},
 		grpcx.Server(grpcx.Options{
 			Name: "grpc",
 			Addr: cfg.GRPCAddr,

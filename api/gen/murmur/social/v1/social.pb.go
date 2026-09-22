@@ -1757,6 +1757,106 @@ func (x *ListAuthorPostsResponse) GetNextPageToken() string {
 	return ""
 }
 
+type DeletePostRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The caller, who must be the author. Real authorisation arrives in phase 7;
+	// this is the seam it will replace.
+	ActorId       string `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePostRequest) Reset() {
+	*x = DeletePostRequest{}
+	mi := &file_murmur_social_v1_social_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePostRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePostRequest) ProtoMessage() {}
+
+func (x *DeletePostRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_murmur_social_v1_social_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePostRequest.ProtoReflect.Descriptor instead.
+func (*DeletePostRequest) Descriptor() ([]byte, []int) {
+	return file_murmur_social_v1_social_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *DeletePostRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DeletePostRequest) GetActorId() string {
+	if x != nil {
+		return x.ActorId
+	}
+	return ""
+}
+
+type DeletePostResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// False when the post was already deleted. Deleting is idempotent, for the
+	// same reason following is.
+	Deleted       bool `protobuf:"varint,1,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePostResponse) Reset() {
+	*x = DeletePostResponse{}
+	mi := &file_murmur_social_v1_social_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePostResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePostResponse) ProtoMessage() {}
+
+func (x *DeletePostResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_murmur_social_v1_social_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePostResponse.ProtoReflect.Descriptor instead.
+func (*DeletePostResponse) Descriptor() ([]byte, []int) {
+	return file_murmur_social_v1_social_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *DeletePostResponse) GetDeleted() bool {
+	if x != nil {
+		return x.Deleted
+	}
+	return false
+}
+
 var File_murmur_social_v1_social_proto protoreflect.FileDescriptor
 
 const file_murmur_social_v1_social_proto_rawDesc = "" +
@@ -1876,7 +1976,12 @@ const file_murmur_social_v1_social_proto_rawDesc = "" +
 	"page_token\x18\x03 \x01(\tR\tpageToken\"o\n" +
 	"\x17ListAuthorPostsResponse\x12,\n" +
 	"\x05posts\x18\x01 \x03(\v2\x16.murmur.social.v1.PostR\x05posts\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x88\f\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\">\n" +
+	"\x11DeletePostRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
+	"\bactor_id\x18\x02 \x01(\tR\aactorId\".\n" +
+	"\x12DeletePostResponse\x12\x18\n" +
+	"\adeleted\x18\x01 \x01(\bR\adeleted2\xe1\f\n" +
 	"\rSocialService\x12W\n" +
 	"\n" +
 	"CreateUser\x12#.murmur.social.v1.CreateUserRequest\x1a$.murmur.social.v1.CreateUserResponse\x12N\n" +
@@ -1895,7 +2000,9 @@ const file_murmur_social_v1_social_proto_rawDesc = "" +
 	"CreatePost\x12#.murmur.social.v1.CreatePostRequest\x1a$.murmur.social.v1.CreatePostResponse\x12N\n" +
 	"\aGetPost\x12 .murmur.social.v1.GetPostRequest\x1a!.murmur.social.v1.GetPostResponse\x12`\n" +
 	"\rBatchGetPosts\x12&.murmur.social.v1.BatchGetPostsRequest\x1a'.murmur.social.v1.BatchGetPostsResponse\x12f\n" +
-	"\x0fListAuthorPosts\x12(.murmur.social.v1.ListAuthorPostsRequest\x1a).murmur.social.v1.ListAuthorPostsResponseB\xc3\x01\n" +
+	"\x0fListAuthorPosts\x12(.murmur.social.v1.ListAuthorPostsRequest\x1a).murmur.social.v1.ListAuthorPostsResponse\x12W\n" +
+	"\n" +
+	"DeletePost\x12#.murmur.social.v1.DeletePostRequest\x1a$.murmur.social.v1.DeletePostResponseB\xc3\x01\n" +
 	"\x14com.murmur.social.v1B\vSocialProtoP\x01Z<github.com/anwexhaa/murmur/api/gen/murmur/social/v1;socialv1\xa2\x02\x03MSX\xaa\x02\x10Murmur.Social.V1\xca\x02\x10Murmur\\Social\\V1\xe2\x02\x1cMurmur\\Social\\V1\\GPBMetadata\xea\x02\x12Murmur::Social::V1b\x06proto3"
 
 var (
@@ -1910,7 +2017,7 @@ func file_murmur_social_v1_social_proto_rawDescGZIP() []byte {
 	return file_murmur_social_v1_social_proto_rawDescData
 }
 
-var file_murmur_social_v1_social_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_murmur_social_v1_social_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_murmur_social_v1_social_proto_goTypes = []any{
 	(*User)(nil),                           // 0: murmur.social.v1.User
 	(*Post)(nil),                           // 1: murmur.social.v1.Post
@@ -1946,21 +2053,23 @@ var file_murmur_social_v1_social_proto_goTypes = []any{
 	(*BatchGetPostsResponse)(nil),          // 31: murmur.social.v1.BatchGetPostsResponse
 	(*ListAuthorPostsRequest)(nil),         // 32: murmur.social.v1.ListAuthorPostsRequest
 	(*ListAuthorPostsResponse)(nil),        // 33: murmur.social.v1.ListAuthorPostsResponse
-	nil,                                    // 34: murmur.social.v1.BatchGetUsersResponse.UsersEntry
-	nil,                                    // 35: murmur.social.v1.BatchGetFollowerCountsResponse.FollowersEntry
-	nil,                                    // 36: murmur.social.v1.BatchGetPostsResponse.PostsEntry
-	(*timestamppb.Timestamp)(nil),          // 37: google.protobuf.Timestamp
+	(*DeletePostRequest)(nil),              // 34: murmur.social.v1.DeletePostRequest
+	(*DeletePostResponse)(nil),             // 35: murmur.social.v1.DeletePostResponse
+	nil,                                    // 36: murmur.social.v1.BatchGetUsersResponse.UsersEntry
+	nil,                                    // 37: murmur.social.v1.BatchGetFollowerCountsResponse.FollowersEntry
+	nil,                                    // 38: murmur.social.v1.BatchGetPostsResponse.PostsEntry
+	(*timestamppb.Timestamp)(nil),          // 39: google.protobuf.Timestamp
 }
 var file_murmur_social_v1_social_proto_depIdxs = []int32{
-	37, // 0: murmur.social.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	37, // 1: murmur.social.v1.Post.created_at:type_name -> google.protobuf.Timestamp
+	39, // 0: murmur.social.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	39, // 1: murmur.social.v1.Post.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 2: murmur.social.v1.CreateUserResponse.user:type_name -> murmur.social.v1.User
 	0,  // 3: murmur.social.v1.GetUserResponse.user:type_name -> murmur.social.v1.User
-	34, // 4: murmur.social.v1.BatchGetUsersResponse.users:type_name -> murmur.social.v1.BatchGetUsersResponse.UsersEntry
-	35, // 5: murmur.social.v1.BatchGetFollowerCountsResponse.followers:type_name -> murmur.social.v1.BatchGetFollowerCountsResponse.FollowersEntry
+	36, // 4: murmur.social.v1.BatchGetUsersResponse.users:type_name -> murmur.social.v1.BatchGetUsersResponse.UsersEntry
+	37, // 5: murmur.social.v1.BatchGetFollowerCountsResponse.followers:type_name -> murmur.social.v1.BatchGetFollowerCountsResponse.FollowersEntry
 	1,  // 6: murmur.social.v1.CreatePostResponse.post:type_name -> murmur.social.v1.Post
 	1,  // 7: murmur.social.v1.GetPostResponse.post:type_name -> murmur.social.v1.Post
-	36, // 8: murmur.social.v1.BatchGetPostsResponse.posts:type_name -> murmur.social.v1.BatchGetPostsResponse.PostsEntry
+	38, // 8: murmur.social.v1.BatchGetPostsResponse.posts:type_name -> murmur.social.v1.BatchGetPostsResponse.PostsEntry
 	1,  // 9: murmur.social.v1.ListAuthorPostsResponse.posts:type_name -> murmur.social.v1.Post
 	0,  // 10: murmur.social.v1.BatchGetUsersResponse.UsersEntry.value:type_name -> murmur.social.v1.User
 	1,  // 11: murmur.social.v1.BatchGetPostsResponse.PostsEntry.value:type_name -> murmur.social.v1.Post
@@ -1980,24 +2089,26 @@ var file_murmur_social_v1_social_proto_depIdxs = []int32{
 	28, // 25: murmur.social.v1.SocialService.GetPost:input_type -> murmur.social.v1.GetPostRequest
 	30, // 26: murmur.social.v1.SocialService.BatchGetPosts:input_type -> murmur.social.v1.BatchGetPostsRequest
 	32, // 27: murmur.social.v1.SocialService.ListAuthorPosts:input_type -> murmur.social.v1.ListAuthorPostsRequest
-	3,  // 28: murmur.social.v1.SocialService.CreateUser:output_type -> murmur.social.v1.CreateUserResponse
-	5,  // 29: murmur.social.v1.SocialService.GetUser:output_type -> murmur.social.v1.GetUserResponse
-	7,  // 30: murmur.social.v1.SocialService.BatchGetUsers:output_type -> murmur.social.v1.BatchGetUsersResponse
-	9,  // 31: murmur.social.v1.SocialService.Follow:output_type -> murmur.social.v1.FollowResponse
-	11, // 32: murmur.social.v1.SocialService.Unfollow:output_type -> murmur.social.v1.UnfollowResponse
-	13, // 33: murmur.social.v1.SocialService.ListFollowers:output_type -> murmur.social.v1.ListFollowersResponse
-	15, // 34: murmur.social.v1.SocialService.ListFollowing:output_type -> murmur.social.v1.ListFollowingResponse
-	17, // 35: murmur.social.v1.SocialService.GetFollowerCount:output_type -> murmur.social.v1.GetFollowerCountResponse
-	19, // 36: murmur.social.v1.SocialService.BatchGetFollowerCounts:output_type -> murmur.social.v1.BatchGetFollowerCountsResponse
-	21, // 37: murmur.social.v1.SocialService.IsFollowing:output_type -> murmur.social.v1.IsFollowingResponse
-	23, // 38: murmur.social.v1.SocialService.ListHeavyAuthors:output_type -> murmur.social.v1.ListHeavyAuthorsResponse
-	25, // 39: murmur.social.v1.SocialService.FilterFollowing:output_type -> murmur.social.v1.FilterFollowingResponse
-	27, // 40: murmur.social.v1.SocialService.CreatePost:output_type -> murmur.social.v1.CreatePostResponse
-	29, // 41: murmur.social.v1.SocialService.GetPost:output_type -> murmur.social.v1.GetPostResponse
-	31, // 42: murmur.social.v1.SocialService.BatchGetPosts:output_type -> murmur.social.v1.BatchGetPostsResponse
-	33, // 43: murmur.social.v1.SocialService.ListAuthorPosts:output_type -> murmur.social.v1.ListAuthorPostsResponse
-	28, // [28:44] is the sub-list for method output_type
-	12, // [12:28] is the sub-list for method input_type
+	34, // 28: murmur.social.v1.SocialService.DeletePost:input_type -> murmur.social.v1.DeletePostRequest
+	3,  // 29: murmur.social.v1.SocialService.CreateUser:output_type -> murmur.social.v1.CreateUserResponse
+	5,  // 30: murmur.social.v1.SocialService.GetUser:output_type -> murmur.social.v1.GetUserResponse
+	7,  // 31: murmur.social.v1.SocialService.BatchGetUsers:output_type -> murmur.social.v1.BatchGetUsersResponse
+	9,  // 32: murmur.social.v1.SocialService.Follow:output_type -> murmur.social.v1.FollowResponse
+	11, // 33: murmur.social.v1.SocialService.Unfollow:output_type -> murmur.social.v1.UnfollowResponse
+	13, // 34: murmur.social.v1.SocialService.ListFollowers:output_type -> murmur.social.v1.ListFollowersResponse
+	15, // 35: murmur.social.v1.SocialService.ListFollowing:output_type -> murmur.social.v1.ListFollowingResponse
+	17, // 36: murmur.social.v1.SocialService.GetFollowerCount:output_type -> murmur.social.v1.GetFollowerCountResponse
+	19, // 37: murmur.social.v1.SocialService.BatchGetFollowerCounts:output_type -> murmur.social.v1.BatchGetFollowerCountsResponse
+	21, // 38: murmur.social.v1.SocialService.IsFollowing:output_type -> murmur.social.v1.IsFollowingResponse
+	23, // 39: murmur.social.v1.SocialService.ListHeavyAuthors:output_type -> murmur.social.v1.ListHeavyAuthorsResponse
+	25, // 40: murmur.social.v1.SocialService.FilterFollowing:output_type -> murmur.social.v1.FilterFollowingResponse
+	27, // 41: murmur.social.v1.SocialService.CreatePost:output_type -> murmur.social.v1.CreatePostResponse
+	29, // 42: murmur.social.v1.SocialService.GetPost:output_type -> murmur.social.v1.GetPostResponse
+	31, // 43: murmur.social.v1.SocialService.BatchGetPosts:output_type -> murmur.social.v1.BatchGetPostsResponse
+	33, // 44: murmur.social.v1.SocialService.ListAuthorPosts:output_type -> murmur.social.v1.ListAuthorPostsResponse
+	35, // 45: murmur.social.v1.SocialService.DeletePost:output_type -> murmur.social.v1.DeletePostResponse
+	29, // [29:46] is the sub-list for method output_type
+	12, // [12:29] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
 	12, // [12:12] is the sub-list for extension extendee
 	0,  // [0:12] is the sub-list for field type_name
@@ -2018,7 +2129,7 @@ func file_murmur_social_v1_social_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_murmur_social_v1_social_proto_rawDesc), len(file_murmur_social_v1_social_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   37,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

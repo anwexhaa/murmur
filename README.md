@@ -18,7 +18,7 @@ The full build plan lives in [`docs/build-spec.html`](docs/build-spec.html).
 | 02 | GraphQL gateway | **done** |
 | 03 | Fanout on write | **done** |
 | 04 | Hybrid cutover | **done** |
-| 05 | Caching and the read path | not started |
+| 05 | Caching and the read path | **done** |
 | 06 | Real-time subscriptions | not started |
 | 07 | Auth and hardening | not started |
 | 08 | Deploy, observe, prove | not started |
@@ -30,7 +30,8 @@ Requires Go 1.27, Docker and GNU Make.
 ```bash
 make up                # start Postgres, Redis, NATS and Jaeger, then migrate
 make test              # unit tests, race detector on
-make test-integration  # adds the tests that need a real Postgres
+make test-integration  # adds the tests that need Postgres, Redis and NATS
+make loadtest SCENARIO=baseline|viral   # k6, against a running stack
 make lint              # go vet and staticcheck
 make help              # every target
 ```
@@ -93,7 +94,7 @@ internal/
 migrations/   goose SQL migrations
 scripts/      generate.sh, smoke.sh
 deploy/       docker-compose, kubernetes           (phase 8)
-loadtest/     k6 scenarios                         (phase 5)
+loadtest/     k6 scenarios: baseline.js, viral.js
 docs/         the build spec, measurements, traces
 ```
 
@@ -112,8 +113,11 @@ attached, because a number without its conditions is not evidence.
 
 | Measurement | Value | Phase | Detail |
 |---|---|---|---|
-| Downstream calls per 50-post timeline | 163 → **151** | 02 → 03 | [phase2](docs/phase2-baseline.md), [phase3](docs/phase3-fanout.md) |
-| Timeline p99 | 45.67 → 43.06 ms | 02 → 03 | 200 samples; the 150 remaining calls dominate |
+| **Downstream calls per 50-post timeline** | 163 → 151 → **4** | 02 → 05 | [phase5](docs/phase5-caching.md); does not grow with page size |
+| **Timeline p99** | 45.67 → **16.29 ms** | 02 → 05 | 200 samples, same dataset — 2.8× |
+| **Post hydrations reaching the source** | **50 of 596,850** | 05 | flat while readers climbed to 300 |
+| Cache hit ratio | **99.99%** | 05 | local 99.87%, redis 0.12% |
+| Stampede collapse | 500 readers → **2 fetches** | 05 | singleflight, asserted in a test |
 | **Timeline entries lost per worker kill** | **0** | 03 | 10 kill-restart cycles, asserted in a test |
 | **Timeline entries duplicated** | **0** | 03 | same test; `ZADD` is idempotent by construction |
 | Publish-to-visible | 482 ms p50 | 03 | dominated by the relay's 250 ms poll |
@@ -148,6 +152,16 @@ So they don't get relitigated:
 - **Keyset pagination everywhere**, never OFFSET, which re-scans every row it
   skips. Follow edges page on the second column of `follows_by_followee`;
   posts page on the ULID itself.
+- **Loaders are per request, and that is a correctness rule.** `viewerFollows`
+  depends on who is asking, so a loader outliving its request would serve one
+  viewer's answer to another — a data-leak bug, not a performance one.
+- **Deletes are soft.** The post ID is already in hundreds of thousands of
+  Redis timelines and the read path skips IDs it cannot hydrate; removing the
+  row would leave those as permanent silent gaps.
+- **Cache invalidation uses an ephemeral consumer, not a durable one.** Every
+  replica needs the message, which is the opposite of work-sharing. The local
+  TTL is the bound for when the event is lost, and a test asserts both that the
+  stale window exists and that it ends.
 - **Follow is idempotent.** `ON CONFLICT DO NOTHING` plus a `created` flag, so
   a client retrying after a timeout gets success and the truth, not a
   duplicate-key error it would have to interpret.

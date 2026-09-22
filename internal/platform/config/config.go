@@ -58,6 +58,13 @@ type Config struct {
 	FanoutThreshold int64
 	RouteCacheTTL   time.Duration
 	HeavySetRefresh time.Duration
+
+	// Post cache. The local TTL is the documented bound on how long a deleted
+	// post can still be served by a replica that missed the invalidation
+	// event; see the phase 5 notes.
+	PostCacheEntries  int
+	PostCacheLocalTTL time.Duration
+	PostCacheRedisTTL time.Duration
 }
 
 // Postgres holds the source-of-truth database settings.
@@ -132,6 +139,10 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		FanoutThreshold: int64(p.num("FANOUT_THRESHOLD", 10_000)),
 		RouteCacheTTL:   p.dur("ROUTE_CACHE_TTL", 30*time.Second),
 		HeavySetRefresh: p.dur("HEAVY_SET_REFRESH", 15*time.Second),
+
+		PostCacheEntries:  p.num("POST_CACHE_ENTRIES", 10_000),
+		PostCacheLocalTTL: p.dur("POST_CACHE_LOCAL_TTL", 5*time.Second),
+		PostCacheRedisTTL: p.dur("POST_CACHE_REDIS_TTL", 10*time.Minute),
 
 		Postgres: Postgres{
 			DSN:            p.str("POSTGRES_DSN", "postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable"),

@@ -20,3 +20,14 @@ message PostCreated {
   string author_id = 2;
   google.protobuf.Timestamp created_at = 3;
 }
+
+// PostDeleted says a post is gone.
+//
+// It exists to invalidate caches, which is why it carries an ID and nothing
+// else: every consumer's job is to forget, and none of them need the body of
+// a post that no longer exists.
+message PostDeleted {
+  string post_id = 1;
+  string author_id = 2;
+  google.protobuf.Timestamp deleted_at = 3;
+}

@@ -34,13 +34,32 @@ type Service struct {
 	store  *Store
 	social socialv1.SocialServiceClient
 	heavy  *HeavySet
+	cache  *PostCache
 	log    *slog.Logger
 }
 
-// NewService wires a service. A nil heavy set disables the pull side, which is
-// the phase 3 behaviour.
-func NewService(store *Store, social socialv1.SocialServiceClient, heavy *HeavySet, log *slog.Logger) *Service {
-	return &Service{store: store, social: social, heavy: heavy, log: log}
+// NewService wires a service. A nil heavy set disables the pull side; a nil
+// cache hydrates straight from the social service, which is the phase 4
+// behaviour and the baseline the cache is measured against.
+func NewService(store *Store, social socialv1.SocialServiceClient, heavy *HeavySet, cache *PostCache, log *slog.Logger) *Service {
+	return &Service{store: store, social: social, heavy: heavy, cache: cache, log: log}
+}
+
+// hydrate turns post IDs into posts, through the cache when there is one.
+//
+// This is where the viral-post problem lives. Every reader whose timeline
+// contains a popular post asks for that same ID, so without a cache the
+// number of identical downstream fetches is the number of concurrent readers.
+func (s *Service) hydrate(ctx context.Context, ids []string) (map[string]*socialv1.Post, error) {
+	if s.cache != nil {
+		return s.cache.Get(ctx, ids)
+	}
+
+	resp, err := s.social.BatchGetPosts(ctx, &socialv1.BatchGetPostsRequest{Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetPosts(), nil
 }
 
 // assemble reads the viewer's timeline and merges in the heavy accounts they
@@ -147,17 +166,13 @@ func (s *Service) GetTimeline(ctx context.Context, req *timelinev1.GetTimelineRe
 		return &timelinev1.GetTimelineResponse{}, nil
 	}
 
-	// One batch call for the whole page, not one per post. The timeline
+	// One batch for the whole page, not one call per post. The timeline
 	// service was built after the gateway taught us what the alternative
 	// costs.
-	hydrated, err := s.social.BatchGetPosts(ctx, &socialv1.BatchGetPostsRequest{Ids: ids})
+	byID, err := s.hydrate(ctx, ids)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-
-	// Rebuild the page in timeline order. The batch response is a map, and
-	// the whole point of a feed is that its order is meaningful.
-	byID := hydrated.GetPosts()
 	posts := make([]*socialv1.Post, 0, len(ids))
 	for _, id := range ids {
 		if post, ok := byID[id]; ok {

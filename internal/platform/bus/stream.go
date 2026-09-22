@@ -17,6 +17,11 @@ const (
 	PostsStream = "POSTS"
 
 	SubjectPostCreated = "post.created"
+	// Published when a post is removed, so every cache can forget it. A
+	// separate subject rather than a field on post.created, because the
+	// consumers differ: fanout cares about creation, caches care about
+	// deletion, and neither should have to filter the other's traffic.
+	SubjectPostDeleted = "post.deleted"
 	// Events that exhausted their redelivery budget land here instead of
 	// blocking the consumer. Nothing consumes this yet; that is deliberate.
 	// A dead-letter subject nobody reads is still infinitely better than a
@@ -34,7 +39,7 @@ const (
 func EnsureStreams(ctx context.Context, js jetstream.JetStream) error {
 	_, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:     PostsStream,
-		Subjects: []string{SubjectPostCreated, SubjectPostsDead},
+		Subjects: []string{SubjectPostCreated, SubjectPostDeleted, SubjectPostsDead},
 		// File storage, not memory. The entire reason this is JetStream rather
 		// than core NATS is that a restart must not lose events, and a
 		// memory-backed stream would give up exactly that.

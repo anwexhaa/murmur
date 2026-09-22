@@ -215,6 +215,18 @@ run-timeline: ## Run the read-path service
 run-fanout: ## Run the fanout worker
 	$(DEV_RUN) --name murmur-fanout -p 8083:8083 $(GO_IMAGE) go run ./cmd/fanout-worker
 
+# k6 scenarios. SCENARIO picks the file in loadtest/.
+#
+# The viral run prints the post cache's source-tier counter before and after,
+# because that counter staying flat while virtual users climb is the whole
+# claim — the latency number alone cannot distinguish a cache that is working
+# from a database that happens to be fast.
+LOADTEST_SCENARIO ?= baseline
+
+.PHONY: loadtest
+loadtest: ## Run a k6 scenario (make loadtest SCENARIO=baseline|viral)
+	@sh scripts/loadtest.sh $(or $(SCENARIO),$(LOADTEST_SCENARIO))
+
 .PHONY: clean
 clean: ## Remove build output
 	rm -rf bin coverage.out

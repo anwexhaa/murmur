@@ -41,6 +41,7 @@ service SocialService {
   rpc GetPost(GetPostRequest) returns (GetPostResponse);
   rpc BatchGetPosts(BatchGetPostsRequest) returns (BatchGetPostsResponse);
   rpc ListAuthorPosts(ListAuthorPostsRequest) returns (ListAuthorPostsResponse);
+  rpc DeletePost(DeletePostRequest) returns (DeletePostResponse);
 }
 
 message User {
@@ -232,4 +233,17 @@ message ListAuthorPostsRequest {
 message ListAuthorPostsResponse {
   repeated Post posts = 1;
   string next_page_token = 2;
+}
+
+message DeletePostRequest {
+  string id = 1;
+  // The caller, who must be the author. Real authorisation arrives in phase 7;
+  // this is the seam it will replace.
+  string actor_id = 2;
+}
+
+message DeletePostResponse {
+  // False when the post was already deleted. Deleting is idempotent, for the
+  // same reason following is.
+  bool deleted = 1;
 }

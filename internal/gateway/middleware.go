@@ -74,9 +74,12 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 }
 
 // Instrument wraps a handler with everything one request needs: a correlation
-// ID, a deadline, a viewer, a downstream-call counter, and a log line at the
-// end carrying all of it.
-func Instrument(next http.Handler, metrics *Metrics, log *slog.Logger, timeout time.Duration) http.Handler {
+// ID, a deadline, a viewer, per-request loaders, a downstream-call counter,
+// and a log line at the end carrying all of it.
+//
+// clients may be nil, in which case no loaders are built — which is only ever
+// the case in tests of this middleware itself.
+func Instrument(next http.Handler, clients *Clients, metrics *Metrics, log *slog.Logger, timeout time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -91,9 +94,22 @@ func Instrument(next http.Handler, metrics *Metrics, log *slog.Logger, timeout t
 		defer cancel()
 
 		ctx = grpcx.WithRequestID(ctx, requestID)
-		if viewer := r.Header.Get(ViewerHeader); viewer != "" {
+
+		viewer := r.Header.Get(ViewerHeader)
+		if viewer != "" {
 			ctx = WithViewer(ctx, viewer)
 		}
+
+		// Loaders are built here, per request, and die with the context.
+		//
+		// They must not be shared: viewerFollows depends on who is asking, so a
+		// loader outliving its request would serve one viewer's answer to
+		// another. That is a data-leak bug rather than a performance bug, and
+		// building them at exactly this point is what prevents it.
+		if clients != nil {
+			ctx = WithLoaders(ctx, NewLoaders(clients, viewer))
+		}
+
 		ctx, counter := callcount.NewContext(ctx)
 
 		holder := &operationHolder{}

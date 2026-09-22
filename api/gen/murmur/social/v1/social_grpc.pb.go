@@ -35,6 +35,7 @@ const (
 	SocialService_GetPost_FullMethodName                = "/murmur.social.v1.SocialService/GetPost"
 	SocialService_BatchGetPosts_FullMethodName          = "/murmur.social.v1.SocialService/BatchGetPosts"
 	SocialService_ListAuthorPosts_FullMethodName        = "/murmur.social.v1.SocialService/ListAuthorPosts"
+	SocialService_DeletePost_FullMethodName             = "/murmur.social.v1.SocialService/DeletePost"
 )
 
 // SocialServiceClient is the client API for SocialService service.
@@ -76,6 +77,7 @@ type SocialServiceClient interface {
 	GetPost(ctx context.Context, in *GetPostRequest, opts ...grpc.CallOption) (*GetPostResponse, error)
 	BatchGetPosts(ctx context.Context, in *BatchGetPostsRequest, opts ...grpc.CallOption) (*BatchGetPostsResponse, error)
 	ListAuthorPosts(ctx context.Context, in *ListAuthorPostsRequest, opts ...grpc.CallOption) (*ListAuthorPostsResponse, error)
+	DeletePost(ctx context.Context, in *DeletePostRequest, opts ...grpc.CallOption) (*DeletePostResponse, error)
 }
 
 type socialServiceClient struct {
@@ -246,6 +248,16 @@ func (c *socialServiceClient) ListAuthorPosts(ctx context.Context, in *ListAutho
 	return out, nil
 }
 
+func (c *socialServiceClient) DeletePost(ctx context.Context, in *DeletePostRequest, opts ...grpc.CallOption) (*DeletePostResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeletePostResponse)
+	err := c.cc.Invoke(ctx, SocialService_DeletePost_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SocialServiceServer is the server API for SocialService service.
 // All implementations must embed UnimplementedSocialServiceServer
 // for forward compatibility.
@@ -285,6 +297,7 @@ type SocialServiceServer interface {
 	GetPost(context.Context, *GetPostRequest) (*GetPostResponse, error)
 	BatchGetPosts(context.Context, *BatchGetPostsRequest) (*BatchGetPostsResponse, error)
 	ListAuthorPosts(context.Context, *ListAuthorPostsRequest) (*ListAuthorPostsResponse, error)
+	DeletePost(context.Context, *DeletePostRequest) (*DeletePostResponse, error)
 	mustEmbedUnimplementedSocialServiceServer()
 }
 
@@ -342,6 +355,9 @@ func (UnimplementedSocialServiceServer) BatchGetPosts(context.Context, *BatchGet
 }
 func (UnimplementedSocialServiceServer) ListAuthorPosts(context.Context, *ListAuthorPostsRequest) (*ListAuthorPostsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAuthorPosts not implemented")
+}
+func (UnimplementedSocialServiceServer) DeletePost(context.Context, *DeletePostRequest) (*DeletePostResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeletePost not implemented")
 }
 func (UnimplementedSocialServiceServer) mustEmbedUnimplementedSocialServiceServer() {}
 func (UnimplementedSocialServiceServer) testEmbeddedByValue()                       {}
@@ -652,6 +668,24 @@ func _SocialService_ListAuthorPosts_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SocialService_DeletePost_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeletePostRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SocialServiceServer).DeletePost(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SocialService_DeletePost_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SocialServiceServer).DeletePost(ctx, req.(*DeletePostRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SocialService_ServiceDesc is the grpc.ServiceDesc for SocialService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -722,6 +756,10 @@ var SocialService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAuthorPosts",
 			Handler:    _SocialService_ListAuthorPosts_Handler,
+		},
+		{
+			MethodName: "DeletePost",
+			Handler:    _SocialService_DeletePost_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

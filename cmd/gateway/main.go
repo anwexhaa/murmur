@@ -115,7 +115,7 @@ func run() error {
 	// deadline, viewer and call counter inside it, so every downstream span
 	// hangs off one trace and the log line carries that trace's ID.
 	query := otelhttp.NewHandler(
-		gateway.Instrument(srv, gatewayMetrics, log, cfg.RequestTimeout),
+		gateway.Instrument(srv, clients, gatewayMetrics, log, cfg.RequestTimeout),
 		"graphql",
 	)
 	// Methods are listed explicitly rather than registering a bare "/query".

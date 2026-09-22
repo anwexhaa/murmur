@@ -87,17 +87,29 @@ func (r *mutationResolver) Unfollow(ctx context.Context, userID string) (*gqlmod
 	}, nil
 }
 
-// Author is the canonical N+1. One call per post in the page, every one of
-// them a separate round trip, and a timeline of fifty posts by one author
-// makes the same lookup fifty times.
+// Author was the canonical N+1: one call per post, and fifty identical calls
+// for a page by one author. It is now one batched call per request, and the
+// duplicate-author case costs a single key.
+//
+// Note what did not change — the resolver still looks like it fetches one
+// user, because from its own point of view it does. The batching lives in the
+// loader, which is why this rewrite could not disturb the measurement.
 func (r *postResolver) Author(ctx context.Context, obj *gqlmodel.Post) (*gqlmodel.User, error) {
-	resp, err := r.Clients.Social.GetUser(ctx, &socialv1.GetUserRequest{
-		Key: &socialv1.GetUserRequest_Id{Id: obj.AuthorID},
-	})
+	loaders := LoadersFrom(ctx)
+	if loaders == nil {
+		return nil, r.translate(ctx, "post.author", errNoLoaders)
+	}
+
+	user, err := loaders.Users.Load(ctx, obj.AuthorID)
 	if err != nil {
 		return nil, r.translate(ctx, "post.author", err)
 	}
-	return userFromProto(resp.GetUser()), nil
+	if user == nil {
+		// The author was deleted after the post. The post is still real, so
+		// this is a null author rather than a failed request.
+		return nil, nil
+	}
+	return user, nil
 }
 
 // Me is the resolver for the me field.
@@ -187,16 +199,18 @@ func (r *queryResolver) Timeline(ctx context.Context, first *int, after *string)
 	return conn, nil
 }
 
-// FollowerCount is the second N+1: once per user in the response, and a
-// timeline resolves one user per post.
+// FollowerCount was the second N+1. Batched.
 func (r *userResolver) FollowerCount(ctx context.Context, obj *gqlmodel.User) (int, error) {
-	resp, err := r.Clients.Social.GetFollowerCount(ctx, &socialv1.GetFollowerCountRequest{
-		UserId: obj.ID,
-	})
+	loaders := LoadersFrom(ctx)
+	if loaders == nil {
+		return 0, r.translate(ctx, "user.followerCount", errNoLoaders)
+	}
+
+	count, err := loaders.FollowerCounts.Load(ctx, obj.ID)
 	if err != nil {
 		return 0, r.translate(ctx, "user.followerCount", err)
 	}
-	return int(resp.GetFollowers()), nil
+	return count, nil
 }
 
 // ViewerFollows is the third. It is null rather than false when nobody is
@@ -212,15 +226,17 @@ func (r *userResolver) ViewerFollows(ctx context.Context, obj *gqlmodel.User) (*
 		return &following, nil
 	}
 
-	resp, err := r.Clients.Social.IsFollowing(ctx, &socialv1.IsFollowingRequest{
-		FollowerId: viewer,
-		FolloweeId: obj.ID,
-	})
+	loaders := LoadersFrom(ctx)
+	if loaders == nil {
+		return nil, r.translate(ctx, "user.viewerFollows", errNoLoaders)
+	}
+
+	// The batch form of IsFollowing is FilterFollowing, which phase 4 already
+	// needed for the read path's pull side. One query answers fifty resolvers.
+	following, err := loaders.ViewerFollows.Load(ctx, obj.ID)
 	if err != nil {
 		return nil, r.translate(ctx, "user.viewerFollows", err)
 	}
-
-	following := resp.GetFollowing()
 	return &following, nil
 }
 
