@@ -1084,11 +1084,11 @@
             <tbody>
               <tr><td>Downstream calls per 50-post timeline</td><td class="mono">163</td><td class="mono">—</td><td class="mono">02 → 05</td><td>Per-request counter, Prometheus</td></tr>
               <tr><td>Timeline read p99</td><td class="mono">45.7 ms</td><td class="mono">—</td><td class="mono">02 → 05</td><td>200 samples, 2k-user dataset</td></tr>
-              <tr><td>Fanout p99, 100k-follower author</td><td class="mono">—</td><td class="mono">—</td><td class="mono">03 → 04</td><td>Histogram by follower bucket</td></tr>
+              <tr><td>Fanout p99, 100k-follower author</td><td class="mono">24,522 ms</td><td class="mono">0 (pulled)</td><td class="mono">03 &rarr; 04</td><td>500k-follower account, real fanout</td></tr>
               <tr><td>Seed: 500k-follower graph</td><td class="mono">n/a</td><td class="mono">76 s</td><td class="mono">01</td><td>600k users, 2.21M edges, COPY</td></tr>
               <tr><td>Publish-to-visible latency</td><td class="mono">—</td><td class="mono">—</td><td class="mono">03</td><td>Timestamp delta, end to end</td></tr>
-              <tr><td>Fanout threshold (crossover)</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">04</td><td><code>go test -bench</code> sweep</td></tr>
-              <tr><td>Write amplification, largest author</td><td class="mono">—</td><td class="mono">—</td><td class="mono">04</td><td>Redis ops counted per publish</td></tr>
+              <tr><td>Fanout threshold (crossover)</td><td class="mono">n/a</td><td class="mono">10,000</td><td class="mono">04</td><td>Latency budget, not a cost crossover &mdash; ADR 001</td></tr>
+              <tr><td>Write amplification, largest author</td><td class="mono">2,000,010</td><td class="mono">0</td><td class="mono">04</td><td>Redelivery multiplied one post 4&times;</td></tr>
               <tr><td>Timeline entries lost per worker kill</td><td class="mono">—</td><td class="mono">0</td><td class="mono">03</td><td>10 kill-restart cycles, asserted</td></tr>
               <tr><td>Cache hit ratio, LRU / Redis</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">05</td><td>Counter ratio under k6 baseline</td></tr>
               <tr><td>Hot-key Redis ops, viral post</td><td class="mono">—</td><td class="mono">—</td><td class="mono">05</td><td>5k VU converging on one post</td></tr>
