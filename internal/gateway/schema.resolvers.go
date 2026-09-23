@@ -31,6 +31,27 @@ func (r *mutationResolver) CreatePost(ctx context.Context, body string) (*gqlmod
 	return postFromProto(resp.GetPost()), nil
 }
 
+// DeletePost removes a post the caller wrote.
+//
+// Soft delete: the ID is already in a great many Redis timelines, and the read
+// path skips IDs it cannot hydrate. Removing the row would leave those entries
+// as permanent silent gaps.
+func (r *mutationResolver) DeletePost(ctx context.Context, id string) (*gqlmodel.DeleteResult, error) {
+	viewer, err := requireViewer(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := r.Clients.Social.DeletePost(ctx, &socialv1.DeletePostRequest{
+		Id:      id,
+		ActorId: viewer,
+	})
+	if err != nil {
+		return nil, r.translate(ctx, "deletePost", err)
+	}
+	return &gqlmodel.DeleteResult{Deleted: resp.GetDeleted(), ID: id}, nil
+}
+
 // Follow is the resolver for the follow field.
 func (r *mutationResolver) Follow(ctx context.Context, userID string) (*gqlmodel.FollowResult, error) {
 	viewer, err := requireViewer(ctx)
@@ -199,6 +220,87 @@ func (r *queryResolver) Timeline(ctx context.Context, first *int, after *string)
 	return conn, nil
 }
 
+// TimelineUpdates streams posts arriving on the caller's timeline.
+//
+// Three things happen here, in order, and the order is the design:
+//
+//  1. Subscribe first, so nothing published during the replay below is missed.
+//     Subscribing after the replay would leave a window exactly as wide as the
+//     replay takes.
+//  2. Replay what the client missed since its cursor, bounded to one page.
+//  3. Switch to live delivery.
+//
+// The pump runs in its own goroutine and owns the outgoing channel — it is the
+// only writer and the only closer, which is what keeps this free of the
+// send-on-closed-channel race that a hub closing its own channel would create.
+func (r *subscriptionResolver) TimelineUpdates(ctx context.Context, after *string) (<-chan *gqlmodel.TimelineUpdate, error) {
+	viewer, err := requireViewer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Hub == nil {
+		return nil, r.translate(ctx, "timelineUpdates", errNoHub)
+	}
+
+	sub, err := r.Hub.Subscribe(viewer)
+	if err != nil {
+		return nil, r.translate(ctx, "timelineUpdates", err)
+	}
+
+	out := make(chan *gqlmodel.TimelineUpdate, subscriptionOutBuffer)
+
+	go func() {
+		defer close(out)
+		defer sub.Close()
+
+		missed, gapped := r.replay(ctx, viewer, after)
+		for _, update := range missed {
+			if update.Gap {
+				gapped = false
+			}
+			select {
+			case out <- update:
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		// A gap the replay could not deliver — because the replay itself
+		// failed and produced nothing — has to survive into live delivery.
+		// Dropping it here would leave the client believing it has an
+		// unbroken stream while a hole sits behind its cursor, which is the
+		// one failure a gap flag exists to prevent.
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-sub.Done():
+				// Evicted for falling too far behind. Ending the stream is the
+				// signal: a client that is told nothing cannot know to reconnect.
+				return
+
+			case update := <-sub.Updates:
+				resolved := r.hydrateUpdate(ctx, update)
+				if resolved == nil {
+					continue
+				}
+				if gapped {
+					resolved.Gap = true
+					gapped = false
+				}
+				select {
+				case out <- resolved:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return out, nil
+}
+
 // FollowerCount was the second N+1. Batched.
 func (r *userResolver) FollowerCount(ctx context.Context, obj *gqlmodel.User) (int, error) {
 	loaders := LoadersFrom(ctx)
@@ -274,12 +376,16 @@ func (r *Resolver) Post() gqlgen.PostResolver { return &postResolver{r} }
 // Query returns gqlgen.QueryResolver implementation.
 func (r *Resolver) Query() gqlgen.QueryResolver { return &queryResolver{r} }
 
+// Subscription returns gqlgen.SubscriptionResolver implementation.
+func (r *Resolver) Subscription() gqlgen.SubscriptionResolver { return &subscriptionResolver{r} }
+
 // User returns gqlgen.UserResolver implementation.
 func (r *Resolver) User() gqlgen.UserResolver { return &userResolver{r} }
 
 type (
-	mutationResolver struct{ *Resolver }
-	postResolver     struct{ *Resolver }
-	queryResolver    struct{ *Resolver }
-	userResolver     struct{ *Resolver }
+	mutationResolver     struct{ *Resolver }
+	postResolver         struct{ *Resolver }
+	queryResolver        struct{ *Resolver }
+	subscriptionResolver struct{ *Resolver }
+	userResolver         struct{ *Resolver }
 )

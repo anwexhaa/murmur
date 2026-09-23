@@ -36,6 +36,8 @@ models:
     fields:
       author:
         resolver: true
+  TimelineUpdate:
+    model: github.com/anwexhaa/murmur/internal/gateway/gqlmodel.TimelineUpdate
   User:
     model: github.com/anwexhaa/murmur/internal/gateway/gqlmodel.User
     fields:

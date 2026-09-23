@@ -22,6 +22,7 @@ import (
 
 	"github.com/anwexhaa/murmur/internal/gateway"
 	"github.com/anwexhaa/murmur/internal/gateway/gqlgen"
+	"github.com/anwexhaa/murmur/internal/platform/bus"
 	"github.com/anwexhaa/murmur/internal/platform/config"
 	"github.com/anwexhaa/murmur/internal/platform/health"
 	"github.com/anwexhaa/murmur/internal/platform/httpx"
@@ -75,16 +76,59 @@ func run() error {
 	}
 	defer closeClients()
 
+	events, closeBus, err := bus.Open(ctx, cfg.NATS, log)
+	if err != nil {
+		return fmt.Errorf("nats: %w", err)
+	}
+	defer closeBus()
+
 	registry := metrics.New()
 	gatewayMetrics := gateway.NewMetrics(registry)
+
+	hub := gateway.NewHub(events.NC, gateway.HubOptions{
+		BufferSize: cfg.SubscriptionBuffer,
+		MaxDrops:   int64(cfg.SubscriptionMaxDrops),
+		Log:        log,
+		Metrics:    gateway.NewHubMetrics(registry),
+	})
+
+	// One hydration per post rather than one per socket. The capacity run in
+	// docs/phase6-subscriptions.md is what this is here for: without it, the
+	// cost of delivering a post scales with the number of connected clients
+	// instead of with the number of posts.
+	hydrator, err := gateway.NewHydrator(clients.Social, gateway.HydratorOptions{
+		Entries: cfg.PostCacheEntries,
+		TTL:     cfg.PostCacheLocalTTL,
+		Metrics: gateway.NewHydratorMetrics(registry),
+	})
+	if err != nil {
+		return fmt.Errorf("hydrator: %w", err)
+	}
 
 	resolver := &gateway.Resolver{
 		Clients:        clients,
 		Log:            log,
+		Hub:            hub,
+		Hydrator:       hydrator,
 		TimelineFanout: cfg.TimelineFanout,
 	}
 
 	srv := handler.New(gqlgen.NewExecutableSchema(gqlgen.Config{Resolvers: resolver}))
+	// The WebSocket transport must be registered before POST and GET: gqlgen
+	// picks the first transport whose Supports returns true, and the HTTP ones
+	// would claim an upgrade request first.
+	srv.AddTransport(transport.Websocket{
+		KeepAlivePingInterval: cfg.SubscriptionPingInterval,
+		// Same header as every other request. Phase 7 replaces it with a token,
+		// and a WebSocket carries no Authorization header on the upgrade in
+		// most browsers, so the init payload is where that will have to live.
+		InitFunc: func(ctx context.Context, initPayload transport.InitPayload) (context.Context, *transport.InitPayload, error) {
+			if viewer, ok := initPayload[gateway.ViewerHeader].(string); ok && viewer != "" {
+				ctx = gateway.WithViewer(ctx, viewer)
+			}
+			return ctx, nil, nil
+		},
+	})
 	srv.AddTransport(transport.POST{})
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.Options{})
@@ -109,6 +153,7 @@ func run() error {
 
 	checks := health.New(2 * time.Second)
 	checks.Register("redis", func(ctx context.Context) error { return redis.Ping(ctx).Err() })
+	checks.Register("nats", events.Healthy)
 	mux.Handle("GET /readyz", checks.ReadyHandler())
 
 	// otelhttp opens the root span; Instrument then adds the request ID,

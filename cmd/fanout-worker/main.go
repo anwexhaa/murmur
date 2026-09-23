@@ -94,6 +94,7 @@ func run() error {
 	worker := fanout.New(
 		consumer,
 		events.JS,
+		events.NC,
 		socialv1.NewSocialServiceClient(social),
 		timeline.NewStore(redis, cfg.TimelineCap),
 		fanout.Options{

@@ -215,6 +215,39 @@ run-timeline: ## Run the read-path service
 run-fanout: ## Run the fanout worker
 	$(DEV_RUN) --name murmur-fanout -p 8083:8083 $(GO_IMAGE) go run ./cmd/fanout-worker
 
+# Three gateway replicas, for the phase 6 checks.
+#
+# One replica cannot demonstrate anything about subscriptions that an in-memory
+# hub would not also appear to demonstrate. Building the binary once and running
+# it three times is both faster than three `go run` builds and closer to what is
+# actually deployed: three identical processes, no shared state between them.
+.PHONY: gateway-binary run-gateway-replicas stop-gateway-replicas realtime
+gateway-binary: ## Build a linux gateway binary the replica targets share
+	$(GO_IN_CONTAINER) go build -o /src/bin/gateway-linux ./cmd/gateway
+
+run-gateway-replicas: gateway-binary ## Start gateways a, b and c on 8080, 8085 and 8090
+	@for spec in a:8080 b:8085 c:8090; do \
+		name=$${spec%%:*}; port=$${spec##*:}; \
+		$(DOCKER) rm -f murmur-gateway-$$name >/dev/null 2>&1 || true; \
+		$(DOCKER) run -d --rm --name murmur-gateway-$$name \
+			-v "$(CURDIR):/src" -w /src --network murmur_default \
+			-p $$port:8080 \
+			-e REDIS_ADDR="redis:6379" -e NATS_URL="nats://nats:4222" \
+			-e SOCIAL_ADDR="murmur-social:9081" -e TIMELINE_ADDR="murmur-timeline:9082" \
+			$(GO_IMAGE) /src/bin/gateway-linux >/dev/null; \
+		echo "gateway $$name on http://localhost:$$port"; \
+	done
+
+stop-gateway-replicas: ## Stop the three replicas
+	@$(DOCKER) rm -f murmur-gateway-a murmur-gateway-b murmur-gateway-c >/dev/null 2>&1 || true
+
+# AUTHOR and FOLLOWER are ids from the seeded graph; FOLLOWER must follow AUTHOR.
+realtime: ## Verify cross-replica subscriptions (make realtime AUTHOR=... FOLLOWER=...)
+	@test -n "$(AUTHOR)" || { echo "set AUTHOR to a seeded user id"; exit 1; }
+	@test -n "$(FOLLOWER)" || { echo "set FOLLOWER to a user who follows AUTHOR"; exit 1; }
+	$(GO_IN_CONTAINER) go build -o /src/bin/subscribe-linux scripts/subscribe.go
+	$(DEV_RUN) $(GO_IMAGE) sh scripts/realtime.sh $(AUTHOR) $(FOLLOWER)
+
 # k6 scenarios. SCENARIO picks the file in loadtest/.
 #
 # The viral run prints the post cache's source-tier counter before and after,

@@ -24,6 +24,14 @@ import (
 type Resolver struct {
 	Clients *Clients
 	Log     *slog.Logger
+	// Hub delivers live updates. Nil disables subscriptions, which is what a
+	// gateway built without a NATS connection gets.
+	Hub *Hub
+
+	// Hydrator turns the post IDs the hub delivers into posts, sharing one
+	// fetch across every socket that was notified. Nil falls back to an
+	// unshared lookup per update, which is correct and does not scale.
+	Hydrator *Hydrator
 
 	// TimelineFanout caps how many followed accounts the naive timeline will
 	// query. Without it, a request from an account following ten thousand

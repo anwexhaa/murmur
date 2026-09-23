@@ -1092,8 +1092,11 @@
               <tr><td>Timeline entries lost per worker kill</td><td class="mono">—</td><td class="mono">0</td><td class="mono">03</td><td>10 kill-restart cycles, asserted</td></tr>
               <tr><td>Cache hit ratio, LRU / Redis</td><td class="mono">n/a</td><td class="mono">99.99%</td><td class="mono">05</td><td>local 99.87%, redis 0.12%</td></tr>
               <tr><td>Hot-key Redis ops, viral post</td><td class="mono">596,850</td><td class="mono">50</td><td class="mono">05</td><td>300 concurrent readers, one timeline</td></tr>
-              <tr><td>Concurrent WS connections per pod</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">06</td><td>Ramped connection load test</td></tr>
-              <tr><td>Cross-pod delivery p99</td><td class="mono">n/a</td><td class="mono">—</td><td class="mono">06</td><td>3 replicas, publish A → receive C</td></tr>
+              <tr><td>Concurrent WS connections per pod</td><td class="mono">n/a</td><td class="mono">2,000</td><td class="mono">06</td><td>Ramped 400/s, 139.6 MiB, 0 failed</td></tr>
+              <tr><td>Cross-pod delivery p99</td><td class="mono">n/a</td><td class="mono">292.7 ms</td><td class="mono">06</td><td>3 replicas, publish A &rarr; receive C, 100/100</td></tr>
+              <tr><td>GetPost calls per 40,000 live updates</td><td class="mono">40,000</td><td class="mono">21</td><td class="mono">06</td><td>Per-post singleflight; 20 distinct posts</td></tr>
+              <tr><td>Live delivery p99, 2,000 sockets</td><td class="mono">986.7 ms</td><td class="mono">677.4 ms</td><td class="mono">06</td><td>Same run, before and after the hydrator</td></tr>
+              <tr><td>Updates dropped / connections evicted</td><td class="mono">&mdash;</td><td class="mono">0 / 0</td><td class="mono">06</td><td>40,000 delivered, 64-slot buffers</td></tr>
               <tr><td>Failed requests during pod kill</td><td class="mono">—</td><td class="mono">0</td><td class="mono">08</td><td>Chaos experiment under load</td></tr>
             </tbody>
           </table>
@@ -1115,7 +1118,7 @@
 
         <p class="cvline">Made fanout safe under at-least-once delivery by keeping timeline writes idempotent, so killing a worker mid-fanout across ten cycles left <em>0</em> lost and <em>0</em> duplicated entries; a transactional outbox closed the window where a committed post could be published to nobody.</p>
 
-        <p class="cvline">Held <em>N</em> concurrent GraphQL subscriptions per pod with bounded per-connection buffers and NATS subject routing, so a publish on one replica reaches a client on another in <em>X</em>ms and one deliberately slow consumer leaves other clients' p99 unchanged.</p>
+        <p class="cvline">Held <em>2,000</em> concurrent GraphQL subscriptions per pod in 140&nbsp;MiB with bounded per-connection buffers and NATS subject routing, so a publish on one replica reaches a client on another in <em>31</em>ms and one deliberately slow consumer leaves other clients' p99 unchanged; collapsing per-socket hydration into one shared fetch cut 40,000 downstream calls to <em>21</em>.</p>
 
         <p class="cvline">Collapsed a viral-post cache stampede with <code>singleflight</code>, holding downstream fetches flat at <em>1</em> while virtual users climbed to <em>5,000</em>.</p>
 

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -269,5 +270,138 @@ func TestWithViewerRoundTrips(t *testing.T) {
 	}
 	if got := Viewer(context.Background()); got != "" {
 		t.Errorf("Viewer() on a bare context = %q, want empty", got)
+	}
+}
+
+// TestInstrumentExemptsWebSocketsFromTheDeadline pins the reason the request
+// timeout is applied conditionally. A subscription outliving fifteen seconds is
+// the normal case, not a stuck request.
+func TestInstrumentExemptsWebSocketsFromTheDeadline(t *testing.T) {
+	metrics, _ := newTestMetrics(t)
+
+	var hasDeadline bool
+	handler := Instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hasDeadline = r.Context().Deadline()
+	}), nil, metrics, quietLogger(), 50*time.Millisecond)
+
+	req := httptest.NewRequest(http.MethodGet, "/query", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "keep-alive, Upgrade")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if hasDeadline {
+		t.Fatal("a websocket upgrade inherited the request timeout; every subscription would die on that clock")
+	}
+}
+
+func TestInstrumentStillDeadlinesOrdinaryRequests(t *testing.T) {
+	metrics, _ := newTestMetrics(t)
+
+	var hasDeadline bool
+	handler := Instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hasDeadline = r.Context().Deadline()
+	}), nil, metrics, quietLogger(), 50*time.Millisecond)
+
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
+
+	if !hasDeadline {
+		t.Fatal("an ordinary request lost its deadline")
+	}
+}
+
+// TestIsWebSocketUpgradeReadsBothHeaders covers the ambiguity the function
+// exists to resolve: Connection carries a token list, and either header alone
+// proves nothing.
+func TestIsWebSocketUpgradeReadsBothHeaders(t *testing.T) {
+	cases := []struct {
+		name       string
+		upgrade    string
+		connection string
+		want       bool
+	}{
+		{"plain upgrade", "websocket", "Upgrade", true},
+		{"token list", "websocket", "keep-alive, Upgrade", true},
+		{"mixed case", "WebSocket", "upgrade", true},
+		{"no connection token", "websocket", "keep-alive", false},
+		{"connection without upgrade header", "", "Upgrade", false},
+		{"other protocol", "h2c", "Upgrade", false},
+		{"substring is not a token", "websocket", "Upgrades", false},
+		{"nothing at all", "", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/query", nil)
+			if tc.upgrade != "" {
+				req.Header.Set("Upgrade", tc.upgrade)
+			}
+			if tc.connection != "" {
+				req.Header.Set("Connection", tc.connection)
+			}
+			if got := isWebSocketUpgrade(req); got != tc.want {
+				t.Fatalf("isWebSocketUpgrade = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestInstrumentedHandlerCanStillHijack is the regression test for the bug that
+// only a real upgrade found.
+//
+// Wrapping a ResponseWriter to record the status code silently strips every
+// optional interface the original implemented. Queries carried on, and the
+// WebSocket transport answered 501 — a status that blames the transport rather
+// than the wrapper. Nothing short of an actual upgrade attempt surfaces it,
+// which is why this test performs one instead of asserting on the type.
+func TestInstrumentedHandlerCanStillHijack(t *testing.T) {
+	metrics, _ := newTestMetrics(t)
+
+	hijacked := make(chan error, 1)
+	handler := Instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			hijacked <- errors.New("the wrapped ResponseWriter is not an http.Hijacker")
+			return
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			hijacked <- err
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"))
+		hijacked <- nil
+	}), nil, metrics, quietLogger(), 50*time.Millisecond)
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/query", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+
+	resp, err := server.Client().Do(req)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusSwitchingProtocols {
+			t.Fatalf("status = %d, want 101", resp.StatusCode)
+		}
+	}
+
+	if err := <-hijacked; err != nil {
+		t.Fatalf("hijack through the instrumented handler: %v", err)
+	}
+}
+
+// TestStatusRecorderHijackFailsCleanly covers the httptest.ResponseRecorder
+// case, which is not hijackable. An error beats a panic: a test double that
+// cannot upgrade should say so.
+func TestStatusRecorderHijackFailsCleanly(t *testing.T) {
+	recorder := &statusRecorder{ResponseWriter: httptest.NewRecorder(), status: http.StatusOK}
+	if _, _, err := recorder.Hijack(); err == nil {
+		t.Fatal("hijacking a non-hijackable writer should fail")
 	}
 }

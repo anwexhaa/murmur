@@ -121,3 +121,21 @@ func StreamSequence(msg jetstream.Msg) (uint64, error) {
 	}
 	return meta.Sequence.Stream, nil
 }
+
+// TimelineSubject is where live updates for one user are published.
+//
+// Core NATS, not JetStream. These notifications are ephemeral by design: if
+// nobody is connected, nobody needs them, because the timeline itself is
+// already materialised in Redis and is what a client reads on connect. Putting
+// them on a stream would persist a notification for every follower of every
+// post so that an offline user could be told about something they will see
+// anyway.
+//
+// One subject per user is what lets a gateway subscribe to exactly the users
+// connected to it, and lets the publisher stay ignorant of where anyone is
+// connected.
+func TimelineSubject(userID string) string { return "timeline." + userID }
+
+// TimelineSubjectPrefix matches every user's live subject, for wildcard
+// subscribers such as a debugging tap.
+const TimelineSubjectPrefix = "timeline.*"

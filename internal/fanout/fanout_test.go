@@ -240,7 +240,7 @@ func runWorker(t *testing.T, consumer jetstream.Consumer, social socialv1.Social
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	worker := fanout.New(consumer, testJS, social, store, fanout.Options{
+	worker := fanout.New(consumer, testJS, testNC, social, store, fanout.Options{
 		Concurrency:  4,
 		FollowerPage: 100,
 		MaxDeliver:   3,

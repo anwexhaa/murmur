@@ -2,6 +2,12 @@
 
 package gqlmodel
 
+type DeleteResult struct {
+	// False when the post was already deleted. Deleting is idempotent.
+	Deleted bool   `json:"deleted"`
+	ID      string `json:"id"`
+}
+
 type FollowResult struct {
 	// False when the edge already existed. Following is idempotent.
 	Changed bool  `json:"changed"`
@@ -27,4 +33,7 @@ type PostEdge struct {
 }
 
 type Query struct {
+}
+
+type Subscription struct {
 }

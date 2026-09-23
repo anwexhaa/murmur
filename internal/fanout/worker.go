@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
@@ -137,6 +138,9 @@ func followerBucket(n int) string {
 type Worker struct {
 	consumer jetstream.Consumer
 	js       jetstream.JetStream
+	// nc is the core NATS connection used for live notifications, which are
+	// deliberately not on a stream. May be nil, which disables them.
+	nc       *nats.Conn
 	social   socialv1.SocialServiceClient
 	timeline *timeline.Store
 	router   *Router
@@ -147,6 +151,7 @@ type Worker struct {
 func New(
 	consumer jetstream.Consumer,
 	js jetstream.JetStream,
+	nc *nats.Conn,
 	social socialv1.SocialServiceClient,
 	timelines *timeline.Store,
 	opts Options,
@@ -163,6 +168,7 @@ func New(
 	return &Worker{
 		consumer: consumer,
 		js:       js,
+		nc:       nc,
 		social:   social,
 		timeline: timelines,
 		router:   NewRouter(social, opts.Threshold, opts.RouteCacheTTL, nil),
@@ -249,7 +255,7 @@ func (w *Worker) handle(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	written, err := w.fanout(ctx, &event)
+	written, err := w.fanout(ctx, &event, msg.Data())
 	if err != nil {
 		if ctx.Err() != nil {
 			// Shutting down. Leave it unacknowledged; another worker, or this
@@ -295,7 +301,7 @@ func (w *Worker) handle(ctx context.Context, msg jetstream.Msg) {
 
 // fanout materialises one post, by whichever route its author's size calls
 // for. It returns how many follower timelines were written.
-func (w *Worker) fanout(ctx context.Context, event *eventsv1.PostCreated) (int, error) {
+func (w *Worker) fanout(ctx context.Context, event *eventsv1.PostCreated, msgData []byte) (int, error) {
 	score := event.GetCreatedAt().AsTime().UnixMilli()
 
 	// The author's own feed is written for every post regardless of mode.
@@ -330,11 +336,35 @@ func (w *Worker) fanout(ctx context.Context, event *eventsv1.PostCreated) (int, 
 		return 0, nil
 	}
 
-	return w.push(ctx, event, score)
+	return w.push(ctx, event, score, msgData)
+}
+
+// notify publishes a live update to every follower's subject.
+//
+// Core NATS and fire-and-forget: a publish with no subscriber is discarded by
+// the server, which is exactly right — an offline follower needs nothing,
+// because the post is already in their materialised timeline.
+//
+// The fan-out here is bounded by the same threshold as the writes it
+// accompanies. Above it a post is not pushed at all, so this is never called
+// for the accounts large enough to make one publish per follower expensive.
+// The phase 4 threshold protects the notification path for free.
+func (w *Worker) notify(followerIDs []string, payload []byte) {
+	if w.nc == nil {
+		return
+	}
+	for _, follower := range followerIDs {
+		if err := w.nc.Publish(bus.TimelineSubject(follower), payload); err != nil {
+			// Not worth failing the event: the timeline write already
+			// succeeded, so the post is not lost, only its liveness.
+			w.opts.Log.Debug("live notification failed", "follower", follower, "error", err)
+			return
+		}
+	}
 }
 
 // push writes the post into every follower's timeline, a page at a time.
-func (w *Worker) push(ctx context.Context, event *eventsv1.PostCreated, score int64) (int, error) {
+func (w *Worker) push(ctx context.Context, event *eventsv1.PostCreated, score int64, msgData []byte) (int, error) {
 	cursor := ""
 	written := 0
 
@@ -357,6 +387,11 @@ func (w *Worker) push(ctx context.Context, event *eventsv1.PostCreated, score in
 			return written, fmt.Errorf("push to timelines: %w", err)
 		}
 		written += len(followers)
+
+		// Tell anyone connected, after the timeline is durable rather than
+		// before. A notification that arrived first would invite a client to
+		// refetch a timeline that did not yet contain the post.
+		w.notify(followers, msgData)
 
 		cursor = resp.GetNextPageToken()
 		if cursor == "" {

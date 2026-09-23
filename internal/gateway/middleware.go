@@ -1,9 +1,13 @@
 package gateway
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,8 +94,23 @@ func Instrument(next http.Handler, clients *Clients, metrics *Metrics, log *slog
 
 		// Every downstream call inherits this deadline, so a request that the
 		// client has given up on stops costing the backends money.
-		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		defer cancel()
+		//
+		// Except a WebSocket, which is meant to stay open. Applying the request
+		// timeout to an upgrade would cancel the connection's context on a
+		// fixed clock and kill every subscription fifteen seconds in — the
+		// deadline that protects a query is exactly the wrong thing for a
+		// stream. A subscription's lifetime is bounded by the socket instead,
+		// and by the keepalive ping that notices when the peer is gone.
+		ctx := r.Context()
+		if isWebSocketUpgrade(r) {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
+			defer cancel()
+		} else {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
 
 		ctx = grpcx.WithRequestID(ctx, requestID)
 
@@ -180,6 +199,23 @@ func RecordOperationName(ctx context.Context, name string) {
 	holder.set(name)
 }
 
+// isWebSocketUpgrade reports whether this request is starting a WebSocket.
+//
+// Both headers are checked because either alone is ambiguous: Connection can
+// carry several comma-separated tokens, and a stray Upgrade header without a
+// Connection token is not an upgrade.
+func isWebSocketUpgrade(r *http.Request) bool {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, token := range strings.Split(r.Header.Get("Connection"), ",") {
+		if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+			return true
+		}
+	}
+	return false
+}
+
 // operationName labels metrics by GraphQL operation rather than by path.
 //
 // Every GraphQL request is a POST to the same URL, so the path carries no
@@ -226,4 +262,27 @@ func (s *statusRecorder) Flush() {
 	if flusher, ok := s.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+// Hijack hands the raw connection to the caller, which is how a WebSocket
+// upgrade takes the socket away from net/http.
+//
+// Wrapping a ResponseWriter silently removes every optional interface the
+// original implemented — Flusher, Hijacker, ReaderFrom — because the wrapper
+// satisfies only http.ResponseWriter and Go has no way to forward the rest.
+// A middleware that logs status codes therefore breaks WebSockets, and the
+// failure is invisible until something actually tries to upgrade: every query
+// keeps working, and the subscription fails with a 501 that names the
+// transport rather than the wrapper that removed it.
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("gateway: the underlying ResponseWriter does not support hijacking")
+	}
+	// The upgrade takes the connection over entirely, so nothing further will
+	// be written through this recorder. Record the status the handshake
+	// promises now, while there is still somewhere to record it.
+	s.status = http.StatusSwitchingProtocols
+	s.wroteHeader = true
+	return hijacker.Hijack()
 }

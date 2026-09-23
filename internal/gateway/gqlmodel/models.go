@@ -22,6 +22,20 @@ type Post struct {
 	AuthorID string `json:"-"`
 }
 
+// TimelineUpdate is one post arriving live.
+//
+// Hand-written for the same reason Post is: it carries the post's ID rather
+// than an embedded object, so the resolver can hydrate it through the same
+// batched path a query uses instead of a separate one.
+type TimelineUpdate struct {
+	Gap bool `json:"gap"`
+
+	PostID string `json:"-"`
+	// Post is set when the update was replayed on reconnect and the post was
+	// already in hand; live updates leave it nil and let the resolver hydrate.
+	Post *Post `json:"-"`
+}
+
 // User is an account.
 type User struct {
 	ID          string    `json:"id"`

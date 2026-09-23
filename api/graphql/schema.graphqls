@@ -80,6 +80,46 @@ type Query {
 
 type Mutation {
   createPost(body: String!): Post!
+  deletePost(id: ID!): DeleteResult!
   follow(userId: ID!): FollowResult!
   unfollow(userId: ID!): FollowResult!
+}
+
+type DeleteResult {
+  "False when the post was already deleted. Deleting is idempotent."
+  deleted: Boolean!
+  id: ID!
+}
+
+"""
+A post arriving on the caller's timeline while they are connected.
+"""
+type TimelineUpdate {
+  post: Post!
+
+  """
+  True when updates were dropped before this one.
+
+  A client that sees this should refetch the timeline rather than assume its
+  view is complete. It is set when the connection's send buffer filled — which
+  means the client was reading more slowly than posts arrived, and the server
+  chose to keep serving everyone else rather than wait for it.
+  """
+  gap: Boolean!
+}
+
+type Subscription {
+  """
+  Posts arriving on the caller's timeline, live.
+
+  `after` is the last post ID the client already has. On reconnect, the server
+  replays what was missed since that cursor before switching to live delivery,
+  bounded by one page — a client away longer than that gets the newest page and
+  `gap: true`.
+
+  Delivery is best-effort by design. The timeline itself is materialised in
+  Redis and is always authoritative; this stream is a latency optimisation over
+  polling it, so a dropped update costs a refetch rather than a lost post.
+  """
+  timelineUpdates(after: String): TimelineUpdate!
 }

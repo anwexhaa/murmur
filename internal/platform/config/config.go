@@ -65,6 +65,11 @@ type Config struct {
 	PostCacheEntries  int
 	PostCacheLocalTTL time.Duration
 	PostCacheRedisTTL time.Duration
+
+	// Subscriptions.
+	SubscriptionBuffer       int
+	SubscriptionMaxDrops     int
+	SubscriptionPingInterval time.Duration
 }
 
 // Postgres holds the source-of-truth database settings.
@@ -143,6 +148,14 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		PostCacheEntries:  p.num("POST_CACHE_ENTRIES", 10_000),
 		PostCacheLocalTTL: p.dur("POST_CACHE_LOCAL_TTL", 5*time.Second),
 		PostCacheRedisTTL: p.dur("POST_CACHE_REDIS_TTL", 10*time.Minute),
+
+		// Small on purpose: the buffer absorbs a brief stall, not a backlog,
+		// and it is multiplied by every connection.
+		SubscriptionBuffer:   p.num("SUBSCRIPTION_BUFFER", 64),
+		SubscriptionMaxDrops: p.num("SUBSCRIPTION_MAX_DROPS", 128),
+		// Keepalive pings reap connections whose peer vanished without a close
+		// frame, which otherwise hold a buffer and a NATS subscription forever.
+		SubscriptionPingInterval: p.dur("SUBSCRIPTION_PING_INTERVAL", 20*time.Second),
 
 		Postgres: Postgres{
 			DSN:            p.str("POSTGRES_DSN", "postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable"),
