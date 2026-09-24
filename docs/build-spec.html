@@ -1096,6 +1096,7 @@
               <tr><td>Cross-pod delivery p99</td><td class="mono">n/a</td><td class="mono">292.7 ms</td><td class="mono">06</td><td>3 replicas, publish A &rarr; receive C, 100/100</td></tr>
               <tr><td>GetPost calls per 40,000 live updates</td><td class="mono">40,000</td><td class="mono">21</td><td class="mono">06</td><td>Per-post singleflight; 20 distinct posts</td></tr>
               <tr><td>Live delivery p99, 2,000 sockets</td><td class="mono">986.7 ms</td><td class="mono">677.4 ms</td><td class="mono">06</td><td>Same run, before and after the hydrator</td></tr>
+              <tr><td>Live delivery p99, split across 3 replicas</td><td class="mono">309.7 ms</td><td class="mono">~200 ms</td><td class="mono">06</td><td>Same session; p50 unmoved, so the tail was per-replica</td></tr>
               <tr><td>Updates dropped / connections evicted</td><td class="mono">&mdash;</td><td class="mono">0 / 0</td><td class="mono">06</td><td>40,000 delivered, 64-slot buffers</td></tr>
               <tr><td>Failed requests during pod kill</td><td class="mono">—</td><td class="mono">0</td><td class="mono">08</td><td>Chaos experiment under load</td></tr>
             </tbody>

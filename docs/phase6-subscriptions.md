@@ -205,18 +205,43 @@ posts it holds are seconds old and every subscriber wants the same handful at
 the same instant, so the tier that matters is the one with no network in it; a
 Redis hop would add latency to the exact path this exists to make fast.
 
-### What is left
+### What was left, and what splitting it three ways showed
 
-p99 is still 677 ms at 2,000 sockets against 125 ms at one. The remaining cost
-is the gateway's own per-socket work — 40,000 GraphQL field resolutions and
-40,000 WebSocket writes from one process in a burst — and it is no longer
-downstream calls, because there are 21 of those.
+p99 was still far above the single-socket number, and the remaining cost was the
+gateway's own per-socket work — 40,000 GraphQL field resolutions and 40,000
+WebSocket writes from one process in a burst — not downstream calls, because
+there were 21 of those.
 
-The answer to that is more replicas, which is precisely what the NATS-routed hub
-makes possible: the subscription state that would make a gateway hard to scale
-horizontally does not exist. A three-way split of the same 2,000 connections is
-the run that would prove it, and it is the one measurement this phase is still
-missing.
+If that diagnosis is right, spreading the same connections across replicas
+should move the tail and leave the median alone, because the median is set by
+the pipeline in front of the gateway and the tail by how many sockets one
+process has to serialise to. Both runs below are from the same session, minutes
+apart, on the same machine and the same graph — the point of re-running the
+control rather than comparing against the previous day's number.
+
+| | 2,000 on one replica | 667 on each of three |
+|---|---|---|
+| p50 | 65.9 ms | 64.8 / 71.5 / **64.8** ms |
+| p95 | 269.5 ms | 147.3 / 174.1 / **132.3** ms |
+| **p99** | **309.7 ms** | 200.7 / 194.7 / **207.0** ms |
+| max | 314.5 ms | 202.2 / 201.7 / 207.8 ms |
+| Peak memory | 233.4 MiB on one process | 84.8 / 81.9 / 114.1 MiB |
+
+**The median did not move and the tail fell by a third.** p95 roughly halved.
+That is the predicted shape rather than a uniform speed-up, which is what makes
+it evidence for the diagnosis instead of merely consistent with it: nothing in
+the split touches the outbox poll, the fanout, or the NATS hop that set the
+median, and everything in it touches the per-socket serialisation that set the
+tail.
+
+Each replica independently collapsed its hydrations to **20 source fetches** —
+one per post. The cost of the hydrator is therefore `posts × replicas`, not
+`posts × sockets`, which is the property that lets the answer to a tail be
+"add a replica" rather than "add a replica and watch the database".
+
+This is the horizontal scalability the NATS-routed hub was built for, measured
+rather than asserted. There is no subscription state to move and no session to
+pin, so the third replica is worth exactly as much as the first.
 
 ## Backpressure
 
@@ -344,3 +369,17 @@ make realtime AUTHOR=<id> FOLLOWER=<id>
 `scripts/wsbench.go` opens thousands and reports the same numbers under load.
 Both are `//go:build ignore` programs rather than commands, because neither is
 part of the deployed system.
+
+## A note on the suite
+
+`internal/fanout` failed once during this phase's verification —
+`TestPostReachesEveryFollower` timed out after 20 seconds on a fanout that takes
+two seconds warm. It did not reproduce: three runs in isolation and two full
+suite runs all passed, and the failing run was the first thing to touch a
+freshly started Docker VM while every package ran in parallel under `-race`.
+
+The test's wait is a hang detector, not a performance assertion — how fast the
+fanout runs is what `murmur_fanout_duration_seconds` measures. A deadline tight
+enough to double as a timing assertion fails for reasons that have nothing to do
+with the code, so it is now 90 seconds. That is slower to fail when something is
+genuinely wedged, and it no longer fails when the machine is merely busy.

@@ -263,10 +263,22 @@ func runWorker(t *testing.T, consumer jetstream.Consumer, social socialv1.Social
 	}
 }
 
+// waitForTimeout is a hang detector, not a performance assertion.
+//
+// What these tests assert is that the work happens at all; how fast it happens
+// is what murmur_fanout_duration_seconds is for. Those are different questions,
+// and a deadline tight enough to double as the second one fails for reasons
+// that have nothing to do with the code — a cold Docker VM running every
+// package in parallel under -race once blew a 20-second wait on a fanout that
+// takes two seconds warm. Generous here costs a slow failure in the rare case
+// where something really is wedged, and buys a suite that fails only when
+// something is wrong.
+const waitForTimeout = 90 * time.Second
+
 func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Helper()
 
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(waitForTimeout)
 	for time.Now().Before(deadline) {
 		if condition() {
 			return

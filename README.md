@@ -133,6 +133,7 @@ attached, because a number without its conditions is not evidence.
 | **Cross-replica delivery** | publish on A → socket on C | 06 | [phase6](docs/phase6-subscriptions.md); 100/100 posts, two replicas |
 | **GetPost calls per 40,000 live updates** | 40,000 → **21** | 06 | 20 distinct posts; singleflight collapsed 26,439 |
 | Live delivery p99, 2,000 sockets | 986.7 → **677.4 ms** | 06 | same run, before and after the hydrator |
+| **Live delivery p99, 2,000 sockets split 3 ways** | 309.7 → **~200 ms** | 06 | same session; p50 unmoved, so the tail was per-replica work |
 | Live delivery p50, one socket | **31.4 ms** | 06 | end to end from `createdAt`, 25 ms outbox poll |
 | Subscriptions per replica | **2,000** | 06 | 139.6 MiB, 0 failed, 0 dropped, 0 evicted |
 | Memory per connection | ~**66 KiB** | 06 | 64-slot buffer, evicts at 128 consecutive drops |
