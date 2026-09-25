@@ -483,7 +483,7 @@
               <tr><td>PostgreSQL</td><td><span class="pill pill-have">Have</span></td><td>Source of truth, transactional outbox, cursor pagination</td></tr>
               <tr><td>Redis</td><td><span class="pill pill-have">Have</span></td><td>Timeline ZSETs, post cache, rate limiter — Lua where atomicity matters</td></tr>
               <tr><td>Caching &amp; data-fetching strategy</td><td><span class="pill pill-have">Have</span></td><td>Phase 5 — the measured heart of the project</td></tr>
-              <tr><td>Docker, Kubernetes, CI/CD</td><td><span class="pill pill-have">Have</span></td><td>Phase 8 — same muscle as Helios, new stack</td></tr>
+              <tr><td>Docker, Kubernetes, CI/CD</td><td><span class="pill pill-have">Have</span></td><td>Phase 8 — same muscle as Spoolr's Azure pipeline, new stack</td></tr>
               <tr><td>Load &amp; integration testing</td><td><span class="pill pill-have">Have</span></td><td>testcontainers, k6, and a chaos experiment per failure mode</td></tr>
             </tbody>
           </table>
@@ -735,7 +735,7 @@
 <b>rl:{user_id}:{bucket}</b>   STRING token-bucket counter     Lua, Phase 7</pre>
 
         <div class="callout">
-          <p><strong>The property that makes redelivery safe.</strong> <code>ZADD</code> with the same member is idempotent — re-running it changes nothing. So when JetStream redelivers <code>post.created</code> after a worker dies mid-fanout, the retry is harmless by construction. You do not need dedup tracking; you need to <em>notice</em> that you don't, and say so in the README. This is the same instinct as the idempotency keys in Settle, arrived at from the other direction.</p>
+          <p><strong>The property that makes redelivery safe.</strong> <code>ZADD</code> with the same member is idempotent — re-running it changes nothing. So when JetStream redelivers <code>post.created</code> after a worker dies mid-fanout, the retry is harmless by construction. You do not need dedup tracking; you need to <em>notice</em> that you don't, and say so in the README. This is the same instinct as Spoolr's optimistic concurrency token and Orion Queue's atomic lease, arrived at from the other direction.</p>
         </div>
       </section>
 
@@ -1043,7 +1043,7 @@
           <h4>Build</h4>
           <ul>
             <li>Multi-stage distroless Dockerfiles; images well under 30MB.</li>
-            <li>Kubernetes manifests or a small Helm chart: Deployments, Services, HPA on the gateway, a separate HPA on the fanout worker keyed to JetStream consumer lag — reuse the KEDA pattern from Helios.</li>
+            <li>Kubernetes manifests or a small Helm chart: Deployments, Services, HPA on the gateway, a separate HPA on the fanout worker keyed to JetStream consumer lag.</li>
             <li>Readiness probes that actually check dependencies; liveness probes that don't.</li>
             <li>PodDisruptionBudget and a graceful-shutdown window long enough to drain WebSocket connections.</li>
             <li>GitHub Actions: test → build → push → deploy, with the k6 baseline run as a gate.</li>
