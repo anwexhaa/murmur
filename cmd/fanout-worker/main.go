@@ -18,9 +18,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
+	"github.com/anwexhaa/murmur/internal/auth"
 	"github.com/anwexhaa/murmur/internal/fanout"
+	"github.com/anwexhaa/murmur/internal/platform/authx"
 	"github.com/anwexhaa/murmur/internal/platform/bus"
 	"github.com/anwexhaa/murmur/internal/platform/config"
+	"github.com/anwexhaa/murmur/internal/platform/grpcx"
 	"github.com/anwexhaa/murmur/internal/platform/health"
 	"github.com/anwexhaa/murmur/internal/platform/httpx"
 	"github.com/anwexhaa/murmur/internal/platform/kv"
@@ -83,8 +86,20 @@ func run() error {
 		return err
 	}
 
+	// The worker only calls out; nothing calls it. It signs and does not
+	// verify.
+	signer, err := authx.LoadSigner(cfg, auth.ServiceFanout, log)
+	if err != nil {
+		return err
+	}
+
 	social, err := grpc.NewClient(cfg.SocialAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		// No subject: fanout runs on the queue's behalf, not a user's. The
+		// post being fanned out has an author, but the author did not make
+		// this call -- they made a mutation minutes ago and it has since
+		// become a message.
+		grpc.WithChainUnaryInterceptor(grpcx.UnaryAssertionSigner(signer, nil)))
 	if err != nil {
 		return fmt.Errorf("social client: %w", err)
 	}

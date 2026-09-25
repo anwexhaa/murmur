@@ -2,6 +2,27 @@
 
 package gqlmodel
 
+import (
+	"time"
+)
+
+// A session.
+type AuthPayload struct {
+	// A short-lived signed token, sent as `Authorization: Bearer ...` on every
+	// request. It is not revocable, which is why it is short-lived.
+	AccessToken string `json:"accessToken"`
+	// A long-lived opaque token, sent only to `refresh`.
+	//
+	// It is single-use. Each refresh returns a new one and invalidates the old,
+	// and presenting an already-spent token revokes the entire chain back to the
+	// login that started it -- on the reasoning that two parties holding a secret
+	// meant for one is indistinguishable from theft.
+	RefreshToken string `json:"refreshToken"`
+	// When the access token stops being accepted.
+	ExpiresAt time.Time `json:"expiresAt"`
+	User      *User     `json:"user"`
+}
+
 type DeleteResult struct {
 	// False when the post was already deleted. Deleting is idempotent.
 	Deleted bool   `json:"deleted"`

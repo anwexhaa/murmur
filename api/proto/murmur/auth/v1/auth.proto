@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package murmur.auth.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// AuthService owns credentials and sessions.
+//
+// It is served by social-svc, because it writes to the same database and a
+// registration has to create the user and the credential in one transaction.
+// It is a separate service definition anyway: the surface is small, entirely
+// about secrets, and the day it needs its own process or its own audit trail
+// should be a deployment change rather than a refactor.
+//
+// Two things deliberately do *not* live here. The gateway signs and verifies
+// access tokens itself, because that is stateless and a round trip per request
+// to ask "is this signature valid" would undo the reason for having a signed
+// token at all. And no method takes or returns a password hash -- the
+// plaintext arrives, is checked here, and never leaves.
+service AuthService {
+  // Register creates a user and its credential in one transaction.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Authenticate checks a password. It is the only method that sees one.
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+
+  // ChangePassword rotates a credential and revokes every existing session,
+  // which is what a user changing their password after a scare expects.
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+
+  // IssueRefreshToken starts a new rotation family, at login.
+  rpc IssueRefreshToken(IssueRefreshTokenRequest) returns (IssueRefreshTokenResponse);
+
+  // RotateRefreshToken spends one token and returns its successor.
+  //
+  // Presenting a token that was already spent revokes the entire family and
+  // fails. See RotateRefreshTokenResponse.
+  rpc RotateRefreshToken(RotateRefreshTokenRequest) returns (RotateRefreshTokenResponse);
+
+  // RevokeSession ends one family, at logout.
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
+
+  // RevokeAllSessions ends every family a user has.
+  rpc RevokeAllSessions(RevokeAllSessionsRequest) returns (RevokeAllSessionsResponse);
+}
+
+message RegisterRequest {
+  string handle = 1;
+  string display_name = 2;
+  // Plaintext. Hashed by the service and discarded; it is never stored, logged
+  // or returned.
+  string password = 3;
+}
+
+message RegisterResponse {
+  string user_id = 1;
+  string handle = 2;
+  string display_name = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message AuthenticateRequest {
+  string handle = 1;
+  string password = 2;
+}
+
+message AuthenticateResponse {
+  string user_id = 1;
+  string handle = 2;
+}
+
+message ChangePasswordRequest {
+  string user_id = 1;
+  string current_password = 2;
+  string new_password = 3;
+}
+
+message ChangePasswordResponse {
+  // Sessions ended by the change.
+  int32 sessions_revoked = 1;
+}
+
+message IssueRefreshTokenRequest {
+  string user_id = 1;
+}
+
+message IssueRefreshTokenResponse {
+  // The plaintext token, which the service will never be able to produce
+  // again: only its hash is stored.
+  string refresh_token = 1;
+  string family_id = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message RotateRefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RotateRefreshTokenResponse {
+  string user_id = 1;
+  string refresh_token = 2;
+  string family_id = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message RevokeSessionRequest {
+  // Either identifies the session to end. A client logging out normally holds
+  // its token; an administrator ending a session holds the family.
+  oneof key {
+    string refresh_token = 1;
+    string family_id = 2;
+  }
+}
+
+message RevokeSessionResponse {
+  int32 sessions_revoked = 1;
+}
+
+message RevokeAllSessionsRequest {
+  string user_id = 1;
+}
+
+message RevokeAllSessionsResponse {
+  int32 sessions_revoked = 1;
+}

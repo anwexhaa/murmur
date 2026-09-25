@@ -14,6 +14,7 @@ import (
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
 	"github.com/anwexhaa/murmur/internal/gateway/gqlmodel"
 	"github.com/anwexhaa/murmur/internal/platform/grpcx"
+	"github.com/anwexhaa/murmur/internal/platform/ratelimit"
 )
 
 // Resolver carries what every resolver needs.
@@ -33,6 +34,15 @@ type Resolver struct {
 	// unshared lookup per update, which is correct and does not scale.
 	Hydrator *Hydrator
 
+	// Sessions mints the token pairs the auth mutations return. Nil disables
+	// them, which is what a gateway built without a signing key gets.
+	Sessions *Sessions
+
+	// Limiter throttles the expensive mutations per identity. Nil disables
+	// throttling, which is a development setting and logged as such at
+	// startup.
+	Limiter *ratelimit.Limiter
+
 	// TimelineFanout caps how many followed accounts the naive timeline will
 	// query. Without it, a request from an account following ten thousand
 	// people would make ten thousand calls and time out — which is a true
@@ -49,9 +59,6 @@ const (
 	defaultPostPage = 20
 	maxPostPage     = 100
 )
-
-// errUnauthenticated is returned for fields that need a signed-in viewer.
-var errUnauthenticated = status.Error(codes.Unauthenticated, "no viewer: send an "+ViewerHeader+" header")
 
 func (r *Resolver) fanout() int {
 	if r.TimelineFanout <= 0 {
@@ -191,7 +198,14 @@ func mergePostsNewestFirst(streams [][]*gqlmodel.Post, n int) []*gqlmodel.Post {
 func requireViewer(ctx context.Context) (string, error) {
 	viewer := Viewer(ctx)
 	if viewer == "" {
-		return "", errUnauthenticated
+		// Returned as a GraphQL error rather than the raw status, because a
+		// status returned straight from a resolver reaches the client with
+		// "rpc error: code = Unauthenticated desc = " glued to the front of
+		// it -- gRPC framing leaking out of a GraphQL API, and a small
+		// disclosure of how the edge is built.
+		return "", clientError(
+			"not signed in: send an "+AuthorizationHeader+": Bearer <access token> header",
+			codes.Unauthenticated)
 	}
 	return viewer, nil
 }

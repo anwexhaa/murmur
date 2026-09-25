@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/anwexhaa/murmur/internal/auth"
 )
 
 type message struct {
@@ -62,6 +64,7 @@ func main() {
 	connections := flag.Int("connections", 100, "sockets to open")
 	rampRate := flag.Int("ramp", 200, "connections to open per second")
 	hold := flag.Duration("hold", 30*time.Second, "how long to hold the connections open")
+	signingKey := flag.String("signing-key", os.Getenv("AUTH_SIGNING_KEY"), "base64 Ed25519 seed, to mint tokens for the viewers")
 	flag.Parse()
 
 	viewers, err := readLines(*viewersPath)
@@ -70,6 +73,20 @@ func main() {
 	}
 	if len(viewers) == 0 {
 		log.Fatal("-viewers must name a file with at least one user id")
+	}
+
+	// One signer, thousands of tokens: the seeded accounts have no passwords
+	// to log in with. See scripts/mint.go.
+	if *signingKey == "" {
+		log.Fatal("no signing key: set AUTH_SIGNING_KEY or pass -signing-key")
+	}
+	private, err := auth.DecodeSeed(*signingKey)
+	if err != nil {
+		log.Fatalf("signing key: %v", err)
+	}
+	signer, err := auth.NewSigner(private, auth.ServiceGateway)
+	if err != nil {
+		log.Fatalf("signer: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -100,7 +117,14 @@ func main() {
 		go func() {
 			defer wg.Done()
 
-			conn, err := open(ctx, *url, viewer)
+			token, err := signer.Sign(viewer, "", auth.AudienceClient, time.Hour)
+			if err != nil {
+				failed.Add(1)
+				firstErr.CompareAndSwap(nil, err)
+				return
+			}
+
+			conn, err := open(ctx, *url, token)
 			if err != nil {
 				failed.Add(1)
 				firstErr.CompareAndSwap(nil, err)
@@ -165,7 +189,7 @@ func main() {
 		milli(latency[len(latency)-1]))
 }
 
-func open(ctx context.Context, url, viewer string) (*websocket.Conn, error) {
+func open(ctx context.Context, url, token string) (*websocket.Conn, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
@@ -179,7 +203,7 @@ func open(ctx context.Context, url, viewer string) (*websocket.Conn, error) {
 
 	if err := write(dialCtx, conn, message{
 		Type:    "connection_init",
-		Payload: mustJSON(map[string]string{"X-Murmur-User": viewer}),
+		Payload: mustJSON(map[string]string{"Authorization": "Bearer " + token}),
 	}); err != nil {
 		conn.CloseNow()
 		return nil, err

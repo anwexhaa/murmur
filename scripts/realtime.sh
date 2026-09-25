@@ -29,6 +29,13 @@ GATEWAY_B="${GATEWAY_B:-murmur-gateway-b:8080}"
 GATEWAY_C="${GATEWAY_C:-murmur-gateway-c:8080}"
 SUBSCRIBE="${SUBSCRIBE:-/src/bin/subscribe-linux}"
 
+# Phase 7 made every request carry a signed token, and the seeded accounts have
+# no passwords to log in with. Tokens are minted from the signing key the stack
+# is running with; see scripts/mint.go. The subscribe client does the same for
+# itself from AUTH_SIGNING_KEY.
+: "${AUTH_SIGNING_KEY:?set AUTH_SIGNING_KEY to the signing key the stack is running with}"
+AUTHOR_TOKEN=$(go run scripts/mint.go -viewer "$AUTHOR")
+
 TMP="${TMPDIR:-/tmp}/murmur-realtime.$$"
 mkdir -p "$TMP"
 # shellcheck disable=SC2064
@@ -38,7 +45,7 @@ publish() {
 	# $1 replica, $2 body. Prints the new post's id.
 	wget -q -O- \
 		--header='Content-Type: application/json' \
-		--header="X-Murmur-User: $AUTHOR" \
+		--header="Authorization: Bearer $AUTHOR_TOKEN" \
 		--post-data="{\"query\":\"mutation{ createPost(body:\\\"$2\\\"){ id } }\"}" \
 		"http://$1/query" |
 		grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4

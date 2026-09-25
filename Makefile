@@ -170,6 +170,16 @@ check: lint test-race ## Everything CI runs
 # reliable here. And containers are where these processes run from phase 8
 # onward, so local behaviour matches deployed behaviour — service discovery by
 # hostname included.
+# A signing key for the local stack, committed on purpose.
+#
+# Every service has to agree on it or the gateway's assertions will not verify
+# at social-svc, and a per-process key would make `make run-gateway-replicas`
+# produce three gateways that cannot talk to the same backend. It is the bytes
+# 0..31, it is in a public repository, and it must never appear anywhere real:
+# production sets AUTH_SIGNING_KEY from a secret store and gives the
+# verify-only services AUTH_VERIFYING_KEY instead.
+DEV_AUTH_SIGNING_KEY = AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+
 DEV_RUN = $(DOCKER) run --rm -i \
 	-v "$(CURDIR):/src" \
 	-v murmur-gomodcache:/go/pkg/mod \
@@ -180,7 +190,8 @@ DEV_RUN = $(DOCKER) run --rm -i \
 	-e NATS_URL="nats://nats:4222" \
 	-e SOCIAL_ADDR="murmur-social:9081" \
 	-e TIMELINE_ADDR="murmur-timeline:9082" \
-	-e OTEL_EXPORTER_OTLP_ENDPOINT="jaeger:4317"
+	-e OTEL_EXPORTER_OTLP_ENDPOINT="jaeger:4317" \
+	-e AUTH_SIGNING_KEY="$(DEV_AUTH_SIGNING_KEY)"
 
 .PHONY: seed
 seed: ## Seed a social graph (make seed ARGS="-users 600000 -whale-followers 500000")
@@ -234,6 +245,7 @@ run-gateway-replicas: gateway-binary ## Start gateways a, b and c on 8080, 8085 
 			-p $$port:8080 \
 			-e REDIS_ADDR="redis:6379" -e NATS_URL="nats://nats:4222" \
 			-e SOCIAL_ADDR="murmur-social:9081" -e TIMELINE_ADDR="murmur-timeline:9082" \
+			-e AUTH_SIGNING_KEY="$(DEV_AUTH_SIGNING_KEY)" \
 			$(GO_IMAGE) /src/bin/gateway-linux >/dev/null; \
 		echo "gateway $$name on http://localhost:$$port"; \
 	done
@@ -258,7 +270,7 @@ LOADTEST_SCENARIO ?= baseline
 
 .PHONY: loadtest
 loadtest: ## Run a k6 scenario (make loadtest SCENARIO=baseline|viral)
-	@sh scripts/loadtest.sh $(or $(SCENARIO),$(LOADTEST_SCENARIO))
+	@AUTH_SIGNING_KEY="$(DEV_AUTH_SIGNING_KEY)" sh scripts/loadtest.sh $(or $(SCENARIO),$(LOADTEST_SCENARIO))
 
 .PHONY: clean
 clean: ## Remove build output

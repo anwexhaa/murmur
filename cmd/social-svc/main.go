@@ -15,8 +15,11 @@ import (
 
 	"google.golang.org/grpc"
 
+	authv1 "github.com/anwexhaa/murmur/api/gen/murmur/auth/v1"
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
+	"github.com/anwexhaa/murmur/internal/auth"
 	"github.com/anwexhaa/murmur/internal/domain"
+	"github.com/anwexhaa/murmur/internal/platform/authx"
 	"github.com/anwexhaa/murmur/internal/platform/bus"
 	"github.com/anwexhaa/murmur/internal/platform/config"
 	"github.com/anwexhaa/murmur/internal/platform/db"
@@ -76,8 +79,26 @@ func run() error {
 		return err
 	}
 
+	// social-svc verifies and never signs. It is the one process that holds
+	// the user table, the credentials and the follow graph, and it holds no
+	// key that could mint an identity -- so a compromise here cannot be turned
+	// into impersonating a user to anything else.
+	verifier, err := authx.LoadVerifier(cfg, auth.AudienceInternal, log)
+	if err != nil {
+		return err
+	}
+
 	store := social.NewStore(pool)
 	service := social.NewService(store, domain.NewIDGenerator(), time.Now)
+
+	authService, err := social.NewAuthService(store, auth.NewHasher(auth.HashParams{
+		Memory:      uint32(cfg.Argon2Memory),
+		Time:        uint32(cfg.Argon2Time),
+		Parallelism: uint8(cfg.Argon2Threads),
+	}), domain.NewIDGenerator(), log, time.Now)
+	if err != nil {
+		return fmt.Errorf("auth service: %w", err)
+	}
 
 	registry := metrics.New()
 	relay := social.NewRelay(store, events.JS, social.RelayOptions{
@@ -106,7 +127,9 @@ func run() error {
 			Log:  log,
 			Register: func(srv *grpc.Server) {
 				socialv1.RegisterSocialServiceServer(srv, service)
+				authv1.RegisterAuthServiceServer(srv, authService)
 			},
+			Verifier: verifier,
 			// Reflection lets grpcurl drive the service without a local copy
 			// of the schema. Off in production, where it is free schema
 			// disclosure to anyone who can reach the port.

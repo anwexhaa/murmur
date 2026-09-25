@@ -13,6 +13,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/anwexhaa/murmur/internal/auth"
 	"github.com/anwexhaa/murmur/internal/gateway/callcount"
 	"github.com/anwexhaa/murmur/internal/platform/grpcx"
 )
@@ -79,7 +80,7 @@ func TestInstrumentAttachesRequestIDAndEchoesIt(t *testing.T) {
 	var seen string
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = grpcx.RequestID(r.Context())
-	}), nil, metrics, quietLogger(), time.Second)
+	}), nil, nil, metrics, quietLogger(), time.Second)
 
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/query", nil))
@@ -101,7 +102,7 @@ func TestInstrumentAdoptsACallerSuppliedRequestID(t *testing.T) {
 	var seen string
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = grpcx.RequestID(r.Context())
-	}), nil, metrics, quietLogger(), time.Second)
+	}), nil, nil, metrics, quietLogger(), time.Second)
 
 	req := httptest.NewRequest(http.MethodPost, "/query", nil)
 	req.Header.Set(grpcx.RequestIDKey, supplied)
@@ -112,36 +113,162 @@ func TestInstrumentAdoptsACallerSuppliedRequestID(t *testing.T) {
 	}
 }
 
-func TestInstrumentCarriesTheViewer(t *testing.T) {
+// testTokens builds a signer and the verifier that matches it.
+func testTokens(t *testing.T) (*auth.Signer, *auth.Verifier) {
+	t.Helper()
+	key, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	signer, err := auth.NewSigner(key, auth.ServiceGateway)
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	verifier, err := auth.NewVerifier(signer.PublicKey(), auth.AudienceClient)
+	if err != nil {
+		t.Fatalf("new verifier: %v", err)
+	}
+	return signer, verifier
+}
+
+func TestInstrumentCarriesTheViewerFromAToken(t *testing.T) {
 	metrics, _ := newTestMetrics(t)
+	signer, verifier := testTokens(t)
 	const viewer = "11111111-2222-3333-4444-555555555555"
 
-	var seen string
+	token, err := signer.Sign(viewer, "anwexhaa", auth.AudienceClient, time.Minute)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+
+	var seenID, seenHandle string
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		seen = Viewer(r.Context())
-	}), nil, metrics, quietLogger(), time.Second)
+		seenID = Viewer(r.Context())
+		seenHandle = ViewerHandle(r.Context())
+	}), nil, verifier, metrics, quietLogger(), time.Second)
 
 	req := httptest.NewRequest(http.MethodPost, "/query", nil)
-	req.Header.Set(ViewerHeader, viewer)
+	req.Header.Set(AuthorizationHeader, "Bearer "+token)
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 
-	if seen != viewer {
-		t.Errorf("viewer = %q, want %q", seen, viewer)
+	if seenID != viewer {
+		t.Errorf("viewer = %q, want %q", seenID, viewer)
+	}
+	if seenHandle != "anwexhaa" {
+		t.Errorf("handle = %q, want anwexhaa", seenHandle)
 	}
 }
 
-func TestInstrumentLeavesViewerEmptyWhenNoHeader(t *testing.T) {
+// TestAForgedTokenDoesNotMakeAViewer is the whole reason phase 7 exists. Under
+// the old plaintext header this request would have been whoever it said it was.
+func TestAForgedTokenDoesNotMakeAViewer(t *testing.T) {
 	metrics, _ := newTestMetrics(t)
+	_, verifier := testTokens(t)
+
+	// Signed by a key this gateway has never seen.
+	otherKey, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	attacker, err := auth.NewSigner(otherKey, auth.ServiceGateway)
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	forged, err := attacker.Sign("somebody-else", "victim", auth.AudienceClient, time.Minute)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
 
 	seen := "not-called"
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = Viewer(r.Context())
-	}), nil, metrics, quietLogger(), time.Second)
+	}), nil, verifier, metrics, quietLogger(), time.Second)
+
+	req := httptest.NewRequest(http.MethodPost, "/query", nil)
+	req.Header.Set(AuthorizationHeader, "Bearer "+forged)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if seen != "" {
+		t.Fatalf("a token signed by an unknown key produced viewer %q", seen)
+	}
+}
+
+// TestAnExpiredTokenIsAnonymousNotAnError covers the deliberate choice to
+// degrade rather than reject: a client with a stale token can still read
+// public fields while it refreshes.
+func TestAnExpiredTokenIsAnonymousNotAnError(t *testing.T) {
+	metrics, _ := newTestMetrics(t)
+	signer, verifier := testTokens(t)
+
+	token, err := signer.Sign("user-1", "", auth.AudienceClient, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+
+	seen, called := "not-called", false
+	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		called = true
+		seen = Viewer(r.Context())
+	}), nil, verifier, metrics, quietLogger(), time.Second)
+
+	req := httptest.NewRequest(http.MethodPost, "/query", nil)
+	req.Header.Set(AuthorizationHeader, "Bearer "+token)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if !called {
+		t.Fatal("an expired token stopped the request reaching the handler")
+	}
+	if seen != "" {
+		t.Fatalf("an expired token produced viewer %q", seen)
+	}
+}
+
+func TestInstrumentLeavesViewerEmptyWithNoToken(t *testing.T) {
+	metrics, _ := newTestMetrics(t)
+	_, verifier := testTokens(t)
+
+	seen := "not-called"
+	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		seen = Viewer(r.Context())
+	}), nil, verifier, metrics, quietLogger(), time.Second)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
 	if seen != "" {
 		t.Errorf("viewer = %q, want empty with no header", seen)
+	}
+}
+
+func TestBearerTokenParsing(t *testing.T) {
+	cases := map[string]string{
+		"Bearer abc":        "abc",
+		"bearer abc":        "abc",
+		"BEARER abc":        "abc",
+		"Bearer   abc  ":    "abc",
+		"Basic abc":         "",
+		"abc":               "",
+		"":                  "",
+		"Bearer":            "",
+		"BearerNoSpace abc": "",
+	}
+	for header, want := range cases {
+		if got := BearerToken(header); got != want {
+			t.Errorf("BearerToken(%q) = %q, want %q", header, got, want)
+		}
+	}
+}
+
+// TestTheClientKeyIsTheRemoteAddress pins the rate limiter's identity to
+// something the caller cannot choose. An X-Forwarded-For header would give an
+// attacker a fresh bucket per request.
+func TestTheClientKeyIsTheRemoteAddress(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/query", nil)
+	req.RemoteAddr = "203.0.113.7:54321"
+	req.Header.Set("X-Forwarded-For", "198.51.100.1")
+
+	if got := ClientKeyFromRequest(req); got != "203.0.113.7" {
+		t.Fatalf("client key = %q, want the remote address", got)
 	}
 }
 
@@ -154,7 +281,7 @@ func TestInstrumentImposesADeadline(t *testing.T) {
 	var hasDeadline bool
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		deadline, hasDeadline = r.Context().Deadline()
-	}), nil, metrics, quietLogger(), 250*time.Millisecond)
+	}), nil, nil, metrics, quietLogger(), 250*time.Millisecond)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -176,7 +303,7 @@ func TestInstrumentRecordsTheDownstreamCallCount(t *testing.T) {
 		for range 163 {
 			counter.Record("/murmur.social.v1.SocialService/GetUser")
 		}
-	}), nil, metrics, quietLogger(), time.Second)
+	}), nil, nil, metrics, quietLogger(), time.Second)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -195,7 +322,7 @@ func TestOperationLabelComesFromTheParsedQuery(t *testing.T) {
 
 	handler := Instrument(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		RecordOperationName(r.Context(), "UserProfile")
-	}), nil, metrics, quietLogger(), time.Second)
+	}), nil, nil, metrics, quietLogger(), time.Second)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -210,7 +337,7 @@ func TestUnnamedOperationsShareOneLabel(t *testing.T) {
 	metrics, registry := newTestMetrics(t)
 
 	handler := Instrument(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
-		nil, metrics, quietLogger(), time.Second)
+		nil, nil, metrics, quietLogger(), time.Second)
 
 	for range 3 {
 		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
@@ -227,7 +354,7 @@ func TestInstrumentRecordsTheStatusCode(t *testing.T) {
 	handler := Instrument(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 		_, _ = io.WriteString(w, "nope")
-	}), nil, metrics, quietLogger(), time.Second)
+	}), nil, nil, metrics, quietLogger(), time.Second)
 
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/query", nil))
@@ -282,7 +409,7 @@ func TestInstrumentExemptsWebSocketsFromTheDeadline(t *testing.T) {
 	var hasDeadline bool
 	handler := Instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, hasDeadline = r.Context().Deadline()
-	}), nil, metrics, quietLogger(), 50*time.Millisecond)
+	}), nil, nil, metrics, quietLogger(), 50*time.Millisecond)
 
 	req := httptest.NewRequest(http.MethodGet, "/query", nil)
 	req.Header.Set("Upgrade", "websocket")
@@ -300,7 +427,7 @@ func TestInstrumentStillDeadlinesOrdinaryRequests(t *testing.T) {
 	var hasDeadline bool
 	handler := Instrument(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, hasDeadline = r.Context().Deadline()
-	}), nil, metrics, quietLogger(), 50*time.Millisecond)
+	}), nil, nil, metrics, quietLogger(), 50*time.Millisecond)
 
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/query", nil))
 
@@ -371,7 +498,7 @@ func TestInstrumentedHandlerCanStillHijack(t *testing.T) {
 		defer conn.Close()
 		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"))
 		hijacked <- nil
-	}), nil, metrics, quietLogger(), 50*time.Millisecond)
+	}), nil, nil, metrics, quietLogger(), 50*time.Millisecond)
 
 	server := httptest.NewServer(handler)
 	defer server.Close()

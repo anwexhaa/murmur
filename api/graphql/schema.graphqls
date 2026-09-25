@@ -83,6 +83,70 @@ type Mutation {
   deletePost(id: ID!): DeleteResult!
   follow(userId: ID!): FollowResult!
   unfollow(userId: ID!): FollowResult!
+
+  """
+  Create an account and sign in.
+
+  Handles are checked for shape and uniqueness; passwords for length only.
+  Composition rules teach people to write Password1! and add less entropy than
+  one extra word does.
+  """
+  register(handle: String!, displayName: String!, password: String!): AuthPayload!
+
+  """
+  Exchange a handle and password for a session.
+
+  A wrong password and an unknown handle return the same error after the same
+  amount of work. The difference would otherwise be a fast, silent way to find
+  out which accounts exist.
+  """
+  login(handle: String!, password: String!): AuthPayload!
+
+  """
+  Exchange a refresh token for a new pair.
+
+  The token presented is spent: it will not work a second time. Presenting a
+  spent token ends the whole session -- see `AuthPayload.refreshToken`.
+  """
+  refresh(refreshToken: String!): AuthPayload!
+
+  "End this session. Idempotent: logging out twice is not an error."
+  logout(refreshToken: String!): Boolean!
+
+  """
+  Change the caller's password, ending every session including this one.
+
+  The current password is required even though the caller is already signed
+  in. That is what stops a stolen access token from becoming a permanent
+  account takeover.
+  """
+  changePassword(currentPassword: String!, newPassword: String!): Boolean!
+}
+
+"""
+A session.
+"""
+type AuthPayload {
+  """
+  A short-lived signed token, sent as `Authorization: Bearer ...` on every
+  request. It is not revocable, which is why it is short-lived.
+  """
+  accessToken: String!
+
+  """
+  A long-lived opaque token, sent only to `refresh`.
+
+  It is single-use. Each refresh returns a new one and invalidates the old,
+  and presenting an already-spent token revokes the entire chain back to the
+  login that started it -- on the reasoning that two parties holding a secret
+  meant for one is indistinguishable from theft.
+  """
+  refreshToken: String!
+
+  "When the access token stops being accepted."
+  expiresAt: Time!
+
+  user: User!
 }
 
 type DeleteResult {

@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -28,6 +29,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/anwexhaa/murmur/internal/auth"
 )
 
 type message struct {
@@ -53,6 +56,7 @@ type payload struct {
 func main() {
 	url := flag.String("url", "ws://localhost:8080/query", "gateway websocket endpoint")
 	viewer := flag.String("viewer", "", "user id to subscribe as")
+	signingKey := flag.String("signing-key", os.Getenv("AUTH_SIGNING_KEY"), "base64 Ed25519 seed, to mint a token for -viewer")
 	after := flag.String("after", "", "last post id already seen, to replay from")
 	expect := flag.Int("expect", 0, "exit successfully after this many updates (0 = run until interrupted)")
 	slow := flag.Bool("slow", false, "read very slowly, to exercise the backpressure path")
@@ -62,6 +66,13 @@ func main() {
 
 	if *viewer == "" {
 		log.Fatal("-viewer is required")
+	}
+
+	// The seeded accounts have no passwords, so there is nothing to log in
+	// with. See scripts/mint.go.
+	token, err := mintToken(*signingKey, *viewer)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -82,12 +93,13 @@ func main() {
 	// frame looks exactly like a server that stopped delivering.
 	conn.SetReadLimit(1 << 20)
 
-	// The viewer travels in the init payload rather than a header: a browser
+	// The token travels in the init payload rather than a header: a browser
 	// cannot set headers on a WebSocket upgrade, so anything the connection
-	// needs to authenticate with has to go here.
+	// needs to authenticate with has to go here. The gateway verifies it with
+	// the same verifier and the same audience it uses for an HTTP request.
 	send(ctx, conn, message{
 		Type:    "connection_init",
-		Payload: mustJSON(map[string]string{"X-Murmur-User": *viewer}),
+		Payload: mustJSON(map[string]string{"Authorization": "Bearer " + token}),
 	})
 	if got := receiveType(ctx, conn); got != "connection_ack" {
 		log.Fatalf("expected connection_ack, got %q", got)
@@ -248,4 +260,20 @@ func compact(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return string(data)
+}
+
+// mintToken signs an access token for a seeded account.
+func mintToken(signingKey, viewer string) (string, error) {
+	if signingKey == "" {
+		return "", errors.New("no signing key: set AUTH_SIGNING_KEY or pass -signing-key")
+	}
+	private, err := auth.DecodeSeed(signingKey)
+	if err != nil {
+		return "", fmt.Errorf("signing key: %w", err)
+	}
+	signer, err := auth.NewSigner(private, auth.ServiceGateway)
+	if err != nil {
+		return "", err
+	}
+	return signer.Sign(viewer, "", auth.AudienceClient, time.Hour)
 }

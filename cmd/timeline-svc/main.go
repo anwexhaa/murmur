@@ -18,6 +18,8 @@ import (
 
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
 	timelinev1 "github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1"
+	"github.com/anwexhaa/murmur/internal/auth"
+	"github.com/anwexhaa/murmur/internal/platform/authx"
 	"github.com/anwexhaa/murmur/internal/platform/bus"
 	"github.com/anwexhaa/murmur/internal/platform/config"
 	"github.com/anwexhaa/murmur/internal/platform/grpcx"
@@ -67,8 +69,25 @@ func run() error {
 	}
 	defer closeRedis()
 
+	// timeline-svc is on both sides of the boundary: it serves the gateway and
+	// it calls social-svc, so it verifies inbound assertions and signs
+	// outbound ones.
+	verifier, err := authx.LoadVerifier(cfg, auth.AudienceInternal, log)
+	if err != nil {
+		return err
+	}
+	signer, err := authx.LoadSigner(cfg, auth.ServiceTimeline, log)
+	if err != nil {
+		return err
+	}
+
 	social, err := grpc.NewClient(cfg.SocialAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		// The subject is left empty: a cache refill is work the service does
+		// for itself, not on any one user's behalf, and naming a user who
+		// happened to trigger it would put a misleading identity in
+		// social-svc's logs.
+		grpc.WithChainUnaryInterceptor(grpcx.UnaryAssertionSigner(signer, nil)))
 	if err != nil {
 		return fmt.Errorf("social client: %w", err)
 	}
@@ -126,6 +145,7 @@ func run() error {
 			Register: func(srv *grpc.Server) {
 				timelinev1.RegisterTimelineServiceServer(srv, service)
 			},
+			Verifier:   verifier,
 			Reflection: !cfg.IsProduction(),
 		}),
 		httpx.Server("http", cfg.HTTPAddr, mux, log),

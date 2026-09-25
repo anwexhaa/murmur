@@ -20,7 +20,7 @@ The full build plan lives in [`docs/build-spec.html`](docs/build-spec.html).
 | 04 | Hybrid cutover | **done** |
 | 05 | Caching and the read path | **done** |
 | 06 | Real-time subscriptions | **done** |
-| 07 | Auth and hardening | not started |
+| 07 | Auth and hardening | **done** |
 | 08 | Deploy, observe, prove | not started |
 
 ## Quickstart
@@ -47,8 +47,23 @@ make run-gateway                         # terminal 4: GraphQL
 ```
 
 Then open the playground at <http://localhost:8080/>, or the Jaeger UI at
-<http://localhost:16686>. Sign in by sending an `X-Murmur-User` header with a
-user ID — real auth arrives in phase 7.
+<http://localhost:16686>. Register an account and use the token it returns:
+
+```graphql
+mutation { register(handle: "you", displayName: "You", password: "at least twelve characters") {
+  accessToken
+  refreshToken
+} }
+```
+
+Send it as `Authorization: Bearer <accessToken>` on every request, and exchange
+`refreshToken` through `refresh` when the access token expires. Note that a
+refresh token is single-use: presenting a spent one revokes the whole session.
+
+The seeded accounts have no passwords — `cmd/seed` writes them with `COPY` and
+hashing six hundred thousand of them is argon2 working in the one place nobody
+wants it to. `go run scripts/mint.go -viewer <id>` signs a token for one of
+them, which is what the load tests and the phase 6 scripts use.
 
 ```bash
 make smoke                               # end-to-end gRPC flow
@@ -134,6 +149,12 @@ attached, because a number without its conditions is not evidence.
 | **GetPost calls per 40,000 live updates** | 40,000 → **21** | 06 | 20 distinct posts; singleflight collapsed 26,439 |
 | Live delivery p99, 2,000 sockets | 986.7 → **677.4 ms** | 06 | same run, before and after the hydrator |
 | **Live delivery p99, 2,000 sockets split 3 ways** | 309.7 → **~200 ms** | 06 | same session; p50 unmoved, so the tail was per-replica work |
+| **Refresh token replayed** | whole session **revoked** | 07 | [phase7](docs/phase7-auth.md); the live successor dies too, on purpose |
+| **Hostile 4-level query** | complexity **90,800** vs a 2,000 budget | 07 | a depth limit would have waved it through |
+| Login attempts before throttling | **5**, then 1 per 12s | 07 | per handle *and* per address; they stop different attacks |
+| Unknown account vs wrong password | 154 ms vs **148 ms** | 07 | decoy hash; without it the gap is a handle-enumeration oracle |
+| Concurrent rotations of one token | 8 → **1 succeeds** | 07 | `FOR UPDATE`; the other 7 correctly read as reuse |
+| Concurrent callers vs a 20-token bucket | 200 → **20 allowed** | 07 | the limiter is a Lua script for exactly this reason |
 | Live delivery p50, one socket | **31.4 ms** | 06 | end to end from `createdAt`, 25 ms outbox poll |
 | Subscriptions per replica | **2,000** | 06 | 139.6 MiB, 0 failed, 0 dropped, 0 evicted |
 | Memory per connection | ~**66 KiB** | 06 | 64-slot buffer, evicts at 128 consecutive drops |

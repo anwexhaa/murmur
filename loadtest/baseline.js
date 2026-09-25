@@ -6,14 +6,14 @@
 //
 //   make loadtest SCENARIO=baseline
 //
-// VIEWERS is a comma-separated list of user IDs, supplied by the make target
+// TOKENS is a comma-separated list of access tokens, minted by the make target
 // from the seeded graph. Auth is the X-Murmur-User header until phase 7.
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Trend, Rate } from 'k6/metrics';
 
 const GATEWAY = __ENV.GATEWAY || 'http://localhost:8080';
-const VIEWERS = (__ENV.VIEWERS || '').split(',').filter(Boolean);
+const TOKENS = (__ENV.TOKENS || '').split(',').filter(Boolean);
 
 const timelineDuration = new Trend('timeline_duration', true);
 const timelineErrors = new Rate('timeline_errors');
@@ -55,14 +55,14 @@ const TIMELINE_QUERY = `query HomeTimeline {
 }`;
 
 function viewer() {
-  return VIEWERS[Math.floor(Math.random() * VIEWERS.length)];
+  return TOKENS[Math.floor(Math.random() * TOKENS.length)];
 }
 
 function post(query, user) {
   return http.post(
     `${GATEWAY}/query`,
     JSON.stringify({ operationName: 'HomeTimeline', query }),
-    { headers: { 'Content-Type': 'application/json', 'X-Murmur-User': user } },
+    { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user}` } },
   );
 }
 
@@ -94,6 +94,6 @@ export function writePost() {
       query: 'mutation Write($body: String!) { createPost(body: $body) { id } }',
       variables: { body: `load test post ${Date.now()}` },
     }),
-    { headers: { 'Content-Type': 'application/json', 'X-Murmur-User': user } },
+    { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${user}` } },
   );
 }

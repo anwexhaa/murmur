@@ -438,7 +438,7 @@ func translateFollowError(err error) error {
 // and a delete cannot strand the fanout. CASCADE therefore does not reach it,
 // and leaving it out here leaks events between tests.
 func (s *Store) TruncateAll(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `TRUNCATE users, follows, posts, outbox RESTART IDENTITY CASCADE`)
+	_, err := s.pool.Exec(ctx, `TRUNCATE users, follows, posts, outbox, user_credentials, refresh_tokens RESTART IDENTITY CASCADE`)
 	if err != nil {
 		return fmt.Errorf("truncate: %w", err)
 	}

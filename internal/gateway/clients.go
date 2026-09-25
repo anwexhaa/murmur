@@ -12,11 +12,23 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
+	authv1 "github.com/anwexhaa/murmur/api/gen/murmur/auth/v1"
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
 	timelinev1 "github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1"
+	"github.com/anwexhaa/murmur/internal/auth"
 	"github.com/anwexhaa/murmur/internal/gateway/callcount"
 	"github.com/anwexhaa/murmur/internal/platform/grpcx"
 )
+
+// assertionSubject reads the signed-in account out of a request context, for
+// the assertion signer to name.
+//
+// Deliberately the gateway's own viewer rather than a second context key
+// belonging to grpcx: two places recording who the caller is would eventually
+// disagree, and the one that disagreed would be the one the backends believe.
+func assertionSubject(ctx context.Context) (string, string) {
+	return Viewer(ctx), ViewerHandle(ctx)
+}
 
 // Clients holds the gateway's outbound connections.
 //
@@ -28,6 +40,10 @@ import (
 type Clients struct {
 	Social   socialv1.SocialServiceClient
 	Timeline timelinev1.TimelineServiceClient
+	// Auth shares social-svc's connection: it is the same process, and a
+	// second connection to the same address would double the keepalive
+	// traffic to prove a point about package layout.
+	Auth authv1.AuthServiceClient
 
 	conns []*grpc.ClientConn
 }
@@ -39,7 +55,7 @@ type Clients struct {
 // briefly down therefore delays the first request rather than preventing the
 // gateway from starting, which is what lets the whole stack come up in any
 // order.
-func Dial(_ context.Context, socialAddr, timelineAddr string, log *slog.Logger) (*Clients, func(), error) {
+func Dial(_ context.Context, socialAddr, timelineAddr string, signer *auth.Signer, log *slog.Logger) (*Clients, func(), error) {
 	dial := func(addr string) (*grpc.ClientConn, error) {
 		return grpc.NewClient(addr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -47,6 +63,10 @@ func Dial(_ context.Context, socialAddr, timelineAddr string, log *slog.Logger) 
 			grpc.WithChainUnaryInterceptor(
 				callcount.UnaryClientInterceptor(),
 				forwardRequestID(),
+				// Every outbound call carries a fresh assertion naming the
+				// user it is for. This is what the backends verify, and it is
+				// what replaced trusting a plaintext header.
+				grpcx.UnaryAssertionSigner(signer, assertionSubject),
 				perCallDeadline(3*time.Second),
 			),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -73,6 +93,7 @@ func Dial(_ context.Context, socialAddr, timelineAddr string, log *slog.Logger) 
 	clients := &Clients{
 		Social:   socialv1.NewSocialServiceClient(socialConn),
 		Timeline: timelinev1.NewTimelineServiceClient(timelineConn),
+		Auth:     authv1.NewAuthServiceClient(socialConn),
 		conns:    []*grpc.ClientConn{socialConn, timelineConn},
 	}
 	return clients, func() {

@@ -22,7 +22,7 @@ import { check } from 'k6';
 import { Trend, Rate } from 'k6/metrics';
 
 const GATEWAY = __ENV.GATEWAY || 'http://localhost:8080';
-const VIEWER = __ENV.VIEWER || '';
+const TOKEN = __ENV.TOKEN || '';
 // PEAK is how many concurrent readers to converge on the same timeline.
 //
 // The cache claim holds at any value — the source-tier counter stays at the
@@ -72,7 +72,7 @@ export function readHotTimeline() {
   const res = http.post(
     `${GATEWAY}/query`,
     JSON.stringify({ operationName: 'ViralTimeline', query: TIMELINE_QUERY }),
-    { headers: { 'Content-Type': 'application/json', 'X-Murmur-User': VIEWER } },
+    { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` } },
   );
 
   const ok = check(res, {

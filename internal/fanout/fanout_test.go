@@ -70,14 +70,26 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// testRedisDB keeps these tests off the development keyspace; they flush it.
+// testRedisDB keeps these tests off the development keyspace, and off the
+// timeline package's.
+//
+// Both packages flush the database they run against, and `go test ./...` runs
+// packages in parallel. Sharing one meant timeline's flush could land in the
+// middle of the kill-restart test, deleting the timelines it was waiting to
+// see and turning a twenty-second test into a ninety-second timeout. It passed
+// for four phases on timing luck and started failing reliably the moment a
+// third package joined the same database.
+//
+// The offset derives from the one configured base so there is still a single
+// environment variable to set.
 func testRedisDB() int {
+	base := 1
 	if raw := os.Getenv("MURMUR_TEST_REDIS_DB"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil {
-			return n
+			base = n
 		}
 	}
-	return 1
+	return base + 1
 }
 
 func requireStack(t *testing.T) {
@@ -180,6 +192,26 @@ func (f *fakeSocial) ListFollowers(
 // leaves messages behind cannot fail the next one.
 func uniqueStream(t *testing.T) (jetstream.Consumer, string) {
 	t.Helper()
+	// Three attempts is the production-shaped budget: enough to ride out a
+	// restart, few enough that a genuinely poisoned event stops wasting
+	// capacity quickly.
+	return uniqueStreamWithDeliver(t, 3)
+}
+
+// uniqueStreamWithDeliver builds a stream whose consumer gives up after
+// maxDeliver attempts.
+//
+// The parameter exists for the kill-restart test, and the reason is worth
+// recording. That test kills a worker ten times on purpose, and every kill
+// leaves a message unacknowledged; JetStream counts each redelivery against
+// the same budget a poisoned event spends. With a budget of three and ten
+// kills, whether a message survives to be finished is a race between the
+// restarts and the delivery counter -- and machine load decides which side it
+// lands on. The test is about not losing data across restarts, not about where
+// the dead-letter threshold sits, which
+// TestMalformedEventIsDeadLetteredNotRetriedForever covers on its own.
+func uniqueStreamWithDeliver(t *testing.T, maxDeliver int) (jetstream.Consumer, string) {
+	t.Helper()
 	ctx := t.Context()
 
 	suffix := uuid.NewString()[:8]
@@ -202,7 +234,7 @@ func uniqueStream(t *testing.T) (jetstream.Consumer, string) {
 		FilterSubject: subject,
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		AckWait:       2 * time.Second,
-		MaxDeliver:    3,
+		MaxDeliver:    maxDeliver,
 		DeliverPolicy: jetstream.DeliverAllPolicy,
 	})
 	if err != nil {
@@ -344,7 +376,9 @@ func TestKillingTheWorkerLosesNothingAndDuplicatesNothing(t *testing.T) {
 	)
 
 	store := newTimelineStore(t, 800)
-	consumer, subject := uniqueStream(t)
+	// One attempt per kill, plus a few to finish with. See
+	// uniqueStreamWithDeliver.
+	consumer, subject := uniqueStreamWithDeliver(t, cycles+5)
 	social := &fakeSocial{followers: followerList(followers), pageSize: 50}
 
 	postIDs := make([]string, posts)

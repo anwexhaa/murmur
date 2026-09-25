@@ -70,6 +70,26 @@ type Config struct {
 	SubscriptionBuffer       int
 	SubscriptionMaxDrops     int
 	SubscriptionPingInterval time.Duration
+
+	// Auth. The signing key is the deployment's most sensitive value and the
+	// only one with no workable default: a generated-per-process key would
+	// mean a token issued by one gateway replica is rejected by the next,
+	// which is an authentication system that works until it is scaled.
+	AuthSigningKey   string
+	AuthVerifyingKey string
+	AccessTokenTTL   time.Duration
+	RefreshTokenTTL  time.Duration
+	Argon2Memory     int
+	Argon2Time       int
+	Argon2Threads    int
+
+	// RateLimit turns throttling on. Off leaves the limits unenforced, which
+	// every binary logs a warning about at startup.
+	RateLimit bool
+
+	// GraphQL hardening.
+	QueryComplexityLimit int
+	Introspection        bool
 }
 
 // Postgres holds the source-of-truth database settings.
@@ -157,6 +177,31 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		// frame, which otherwise hold a buffer and a NATS subscription forever.
 		SubscriptionPingInterval: p.dur("SUBSCRIPTION_PING_INTERVAL", 20*time.Second),
 
+		AuthSigningKey:   p.str("AUTH_SIGNING_KEY", ""),
+		AuthVerifyingKey: p.str("AUTH_VERIFYING_KEY", ""),
+		// Short, because an access token is not revocable. See
+		// gateway.AccessTokenTTL.
+		AccessTokenTTL:  p.dur("ACCESS_TOKEN_TTL", 15*time.Minute),
+		RefreshTokenTTL: p.dur("REFRESH_TOKEN_TTL", 30*24*time.Hour),
+		// OWASP's argon2id recommendation. Memory is in KiB and is per
+		// concurrent login, not per process, which is why it is 19MB rather
+		// than RFC 9106's 64MB -- see auth.DefaultParams.
+		Argon2Memory:  p.num("ARGON2_MEMORY_KIB", 19*1024),
+		Argon2Time:    p.num("ARGON2_TIME", 2),
+		Argon2Threads: p.num("ARGON2_THREADS", 1),
+
+		RateLimit: p.boolean("RATE_LIMIT", true),
+
+		// A budget rather than a depth cap. Depth alone lets a query ask for
+		// one field a million times at depth two; complexity multiplies the
+		// cost of a list by how many items were asked for, which is the thing
+		// that actually scales.
+		QueryComplexityLimit: p.num("QUERY_COMPLEXITY_LIMIT", 2000),
+		// Introspection is free schema disclosure. On in development because
+		// the playground needs it; off in production by default, and the
+		// default is computed below once the environment is known.
+		Introspection: p.boolean("GRAPHQL_INTROSPECTION", false),
+
 		Postgres: Postgres{
 			DSN:            p.str("POSTGRES_DSN", "postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable"),
 			MaxConns:       int32(p.num("POSTGRES_MAX_CONNS", 16)),
@@ -181,7 +226,19 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		},
 	}
 
+	// Introspection defaults to on outside production, because the playground
+	// is unusable without it and a development stack has no schema to protect.
+	if _, set := os.LookupEnv("GRAPHQL_INTROSPECTION"); !set && !cfg.IsProduction() {
+		cfg.Introspection = true
+	}
+
 	return cfg, p.err()
+}
+
+// AuthConfigured reports whether this process has the keys it needs to
+// participate in the trust boundary.
+func (c Config) AuthConfigured() bool {
+	return c.AuthSigningKey != "" || c.AuthVerifyingKey != ""
 }
 
 // defaultGRPCAddr derives the gRPC port from the admin port by adding 1000, so
@@ -257,6 +314,22 @@ func (p *parser) ratio(key string, def float64) float64 {
 		return def
 	}
 	return f
+}
+
+// boolean reads a flag. Anything strconv understands is accepted, and an
+// unparseable value is an error rather than a silent false -- a security
+// control turned off by a typo is the failure this avoids.
+func (p *parser) boolean(key string, def bool) bool {
+	raw, ok := os.LookupEnv(key)
+	if !ok || raw == "" {
+		return def
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		p.errs = append(p.errs, fmt.Errorf("%s: %q is not a boolean (true, false, 1, 0)", key, raw))
+		return def
+	}
+	return v
 }
 
 func (p *parser) level(key string, def slog.Level) slog.Level {

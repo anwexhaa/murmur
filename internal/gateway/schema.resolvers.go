@@ -7,7 +7,9 @@ package gateway
 
 import (
 	"context"
+	"strings"
 
+	authv1 "github.com/anwexhaa/murmur/api/gen/murmur/auth/v1"
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
 	timelinev1 "github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1"
 	"github.com/anwexhaa/murmur/internal/gateway/gqlgen"
@@ -106,6 +108,128 @@ func (r *mutationResolver) Unfollow(ctx context.Context, userID string) (*gqlmod
 		Changed: resp.GetRemoved(),
 		User:    userFromProto(target.GetUser()),
 	}, nil
+}
+
+// Register is the resolver for the register field.
+func (r *mutationResolver) Register(ctx context.Context, handle string, displayName string, password string) (*gqlmodel.AuthPayload, error) {
+	if r.Sessions == nil {
+		return nil, r.translate(ctx, "register", errNoSessions)
+	}
+	// Throttled by client address rather than by handle: the handle is chosen
+	// by the caller, so limiting on it means one bucket per attempt and no
+	// limit at all.
+	if err := r.throttle(ctx, ScopeRegister, clientKey(ctx)); err != nil {
+		return nil, err
+	}
+
+	created, err := r.Clients.Auth.Register(ctx, &authv1.RegisterRequest{
+		Handle:      handle,
+		DisplayName: displayName,
+		Password:    password,
+	})
+	if err != nil {
+		return nil, r.translate(ctx, "register", err)
+	}
+
+	payload, err := r.Sessions.start(ctx, created.GetUserId(), created.GetHandle())
+	if err != nil {
+		return nil, r.translate(ctx, "register", err)
+	}
+	return payload, nil
+}
+
+// Login is the resolver for the login field.
+func (r *mutationResolver) Login(ctx context.Context, handle string, password string) (*gqlmodel.AuthPayload, error) {
+	if r.Sessions == nil {
+		return nil, r.translate(ctx, "login", errNoSessions)
+	}
+
+	// Two buckets, because they stop different attacks. The per-handle one
+	// stops a password being guessed against one account from many addresses;
+	// the per-address one stops many accounts being tried from one address,
+	// which is what credential stuffing actually looks like. Either alone
+	// leaves the other wide open.
+	if err := r.throttle(ctx, ScopeLogin, strings.ToLower(handle)); err != nil {
+		return nil, err
+	}
+	if err := r.throttle(ctx, ScopeLoginSource, clientKey(ctx)); err != nil {
+		return nil, err
+	}
+
+	authenticated, err := r.Clients.Auth.Authenticate(ctx, &authv1.AuthenticateRequest{
+		Handle:   handle,
+		Password: password,
+	})
+	if err != nil {
+		return nil, r.translate(ctx, "login", err)
+	}
+
+	payload, err := r.Sessions.start(ctx, authenticated.GetUserId(), authenticated.GetHandle())
+	if err != nil {
+		return nil, r.translate(ctx, "login", err)
+	}
+	return payload, nil
+}
+
+// Refresh is the resolver for the refresh field.
+func (r *mutationResolver) Refresh(ctx context.Context, refreshToken string) (*gqlmodel.AuthPayload, error) {
+	if r.Sessions == nil {
+		return nil, r.translate(ctx, "refresh", errNoSessions)
+	}
+	if err := r.throttle(ctx, ScopeRefresh, clientKey(ctx)); err != nil {
+		return nil, err
+	}
+
+	rotated, err := r.Clients.Auth.RotateRefreshToken(ctx, &authv1.RotateRefreshTokenRequest{
+		RefreshToken: refreshToken,
+	})
+	if err != nil {
+		return nil, r.translate(ctx, "refresh", err)
+	}
+
+	payload, err := r.Sessions.issue(ctx,
+		rotated.GetUserId(), "", rotated.GetRefreshToken(), asTime(rotated.GetExpiresAt()))
+	if err != nil {
+		return nil, r.translate(ctx, "refresh", err)
+	}
+	return payload, nil
+}
+
+// Logout is the resolver for the logout field.
+func (r *mutationResolver) Logout(ctx context.Context, refreshToken string) (bool, error) {
+	if r.Sessions == nil {
+		return false, r.translate(ctx, "logout", errNoSessions)
+	}
+
+	// No viewer required. A client whose access token has already expired
+	// still needs to be able to end its session, and refusing would leave the
+	// refresh token live for another thirty days out of pedantry.
+	if _, err := r.Clients.Auth.RevokeSession(ctx, &authv1.RevokeSessionRequest{
+		Key: &authv1.RevokeSessionRequest_RefreshToken{RefreshToken: refreshToken},
+	}); err != nil {
+		return false, r.translate(ctx, "logout", err)
+	}
+	return true, nil
+}
+
+// ChangePassword is the resolver for the changePassword field.
+func (r *mutationResolver) ChangePassword(ctx context.Context, currentPassword string, newPassword string) (bool, error) {
+	viewer, err := requireViewer(ctx)
+	if err != nil {
+		return false, err
+	}
+	if err := r.throttle(ctx, ScopeLogin, viewer); err != nil {
+		return false, err
+	}
+
+	if _, err := r.Clients.Auth.ChangePassword(ctx, &authv1.ChangePasswordRequest{
+		UserId:          viewer,
+		CurrentPassword: currentPassword,
+		NewPassword:     newPassword,
+	}); err != nil {
+		return false, r.translate(ctx, "changePassword", err)
+	}
+	return true, nil
 }
 
 // Author was the canonical N+1: one call per post, and fifty identical calls

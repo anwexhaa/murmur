@@ -2,13 +2,15 @@
 # Run a k6 scenario against the running stack.
 #
 # Pulls viewer IDs out of the seeded graph so the load hits real accounts with
-# real timelines, and prints the post cache's tier counters around the run.
+# real timelines, mints an access token for each, and prints the post cache's
+# tier counters around the run.
 set -eu
 
 SCENARIO="${1:-baseline}"
 NETWORK="${NETWORK:-murmur_default}"
 GATEWAY="${GATEWAY:-http://murmur-gateway:8080}"
 TIMELINE_METRICS="${TIMELINE_METRICS:-http://localhost:8082/metrics}"
+VIEWER_FILE="bin/loadtest-viewers.txt"
 
 psql() {
 	MSYS_NO_PATHCONV=1 docker exec murmur-postgres-1 psql -U murmur -d murmur -tAc "$1"
@@ -25,7 +27,29 @@ VIEWERS=$(psql "SELECT string_agg(id::text, ',') FROM (
     JOIN follows f ON f.follower_id = u.id
     GROUP BY u.id ORDER BY count(*) DESC LIMIT 25
 ) t")
-HOT_VIEWER=$(echo "$VIEWERS" | cut -d, -f1)
+
+# Phase 7 made every request carry a signed token, and the seeded accounts
+# have no passwords to log in with -- cmd/seed writes six hundred thousand
+# users with COPY, and giving each one a credential would mean six hundred
+# thousand argon2 hashes. So the load test mints its own tokens from the
+# deployment's signing key. That is an operator capability and nothing in the
+# deployed system does it; see the comment at the top of scripts/mint.go.
+: "${AUTH_SIGNING_KEY:?set AUTH_SIGNING_KEY to the signing key the stack is running with}"
+
+echo "minting access tokens"
+mkdir -p bin
+echo "$VIEWERS" | tr ',' '\n' >"$VIEWER_FILE"
+
+TOKENS=$(MSYS_NO_PATHCONV=1 docker run --rm -i \
+	-v "$(pwd -W 2>/dev/null || pwd):/src" \
+	-v murmur-gomodcache:/go/pkg/mod \
+	-w /src \
+	-e AUTH_SIGNING_KEY="$AUTH_SIGNING_KEY" \
+	golang:1.27 go run scripts/mint.go -users "$VIEWER_FILE" |
+	tr ',' '\n' | sed 's/.*": *"//; s/"[},].*//; s/"$//' | paste -sd, -)
+
+HOT_TOKEN=$(echo "$TOKENS" | cut -d, -f1)
+[ -n "$HOT_TOKEN" ] || { echo "FAIL: no tokens were minted" >&2; exit 1; }
 
 BEFORE=$(cache_source_tier)
 echo "post cache source-tier lookups before: ${BEFORE:-0}"
@@ -36,8 +60,8 @@ MSYS_NO_PATHCONV=1 docker run --rm -i \
 	-v "$(pwd -W 2>/dev/null || pwd):/src" \
 	-w /src \
 	-e GATEWAY="$GATEWAY" \
-	-e VIEWERS="$VIEWERS" \
-	-e VIEWER="$HOT_VIEWER" \
+	-e TOKENS="$TOKENS" \
+	-e TOKEN="$HOT_TOKEN" \
 	-e PEAK="${PEAK:-400}" \
 	grafana/k6:latest run "loadtest/$SCENARIO.js"
 

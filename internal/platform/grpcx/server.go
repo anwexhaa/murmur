@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
+	"github.com/anwexhaa/murmur/internal/auth"
 	"github.com/anwexhaa/murmur/internal/platform/lifecycle"
 )
 
@@ -34,6 +35,16 @@ type Options struct {
 
 	// MinRemaining is the deadline floor. See UnaryDeadlineGuard.
 	MinRemaining time.Duration
+
+	// Verifier checks the caller's signed assertion. Nil leaves the port open
+	// to anything that can reach it, which is a development setting -- the
+	// binaries log a warning at startup when it is unset rather than letting
+	// it pass unremarked.
+	Verifier *auth.Verifier
+
+	// ExemptMethods are reachable without an assertion, by full method name.
+	// The gRPC health service is always exempt; a probe has no identity.
+	ExemptMethods []string
 }
 
 // Server builds a gRPC server as a lifecycle component. Stop performs a
@@ -52,6 +63,10 @@ func Server(opts Options) lifecycle.Component {
 		grpc.ChainUnaryInterceptor(
 			UnaryRecovery(opts.Log),
 			UnaryRequestID(),
+			// Before the deadline guard and the logger: an unauthenticated
+			// call should be refused without costing a log line's worth of
+			// formatting, and certainly before it reaches a handler.
+			UnaryAssertion(opts.Verifier, opts.ExemptMethods...),
 			UnaryDeadlineGuard(opts.MinRemaining),
 			UnaryLogging(opts.Log),
 		),

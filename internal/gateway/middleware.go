@@ -14,20 +14,27 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/anwexhaa/murmur/internal/auth"
 	"github.com/anwexhaa/murmur/internal/gateway/callcount"
 	"github.com/anwexhaa/murmur/internal/platform/grpcx"
 )
 
 type viewerKey struct{}
+type viewerHandleKey struct{}
 
-// ViewerHeader names the account making the request.
+// AuthorizationHeader carries the access token.
 //
-// This is scaffolding, and phase 7 deletes it. Trusting a plaintext header
-// means anyone who can reach the port can be anyone, which is exactly the
-// problem signed tokens solve. It is here so the read path can be built and
-// measured before auth exists, and it is confined to this one function so
-// that replacing it touches nothing else.
-const ViewerHeader = "X-Murmur-User"
+// Phase 7 replaced X-Murmur-User, a plaintext header naming whoever the caller
+// said they were, with a signature. The old header was honest scaffolding --
+// it let the read path be built and measured before auth existed -- and it was
+// also a complete authentication bypass for anyone who could reach the port.
+// Nothing outside this file ever knew the difference, which was the point of
+// confining it to one function.
+const AuthorizationHeader = "Authorization"
+
+// bearerPrefix is the scheme, matched case-insensitively because RFC 7235 says
+// the scheme is case-insensitive and some clients send "bearer".
+const bearerPrefix = "bearer "
 
 // Viewer returns the signed-in account's ID, or "" when nobody is.
 func Viewer(ctx context.Context) string {
@@ -35,9 +42,57 @@ func Viewer(ctx context.Context) string {
 	return id
 }
 
+// ViewerHandle returns the signed-in account's handle, or "".
+func ViewerHandle(ctx context.Context) string {
+	handle, _ := ctx.Value(viewerHandleKey{}).(string)
+	return handle
+}
+
 // WithViewer attaches a viewer ID, for tests and for the auth middleware.
 func WithViewer(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, viewerKey{}, userID)
+}
+
+// WithViewerHandle attaches the viewer's handle.
+func WithViewerHandle(ctx context.Context, handle string) context.Context {
+	return context.WithValue(ctx, viewerHandleKey{}, handle)
+}
+
+// BearerToken pulls the access token out of an Authorization header value.
+// It returns "" for anything that is not a bearer credential.
+func BearerToken(header string) string {
+	if len(header) < len(bearerPrefix) {
+		return ""
+	}
+	if !strings.EqualFold(header[:len(bearerPrefix)], bearerPrefix) {
+		return ""
+	}
+	return strings.TrimSpace(header[len(bearerPrefix):])
+}
+
+// Authenticate verifies an access token and returns the context a request
+// should run under.
+//
+// A token that fails to verify produces an anonymous context rather than an
+// error. That is deliberate: the schema has public fields, and a client
+// holding an expired token should be able to read a public profile while it
+// refreshes rather than have the whole request rejected. Fields that require a
+// viewer return Unauthenticated on their own, which is a more useful answer
+// than a blanket 401 on a query that asked for one private field among twenty
+// public ones.
+func Authenticate(ctx context.Context, verifier *auth.Verifier, header string) context.Context {
+	if verifier == nil {
+		return ctx
+	}
+	token := BearerToken(header)
+	if token == "" {
+		return ctx
+	}
+	claims, err := verifier.Parse(token)
+	if err != nil || claims.UserID() == "" {
+		return ctx
+	}
+	return WithViewerHandle(WithViewer(ctx, claims.UserID()), claims.Handle)
 }
 
 // Metrics are the gateway's own instruments.
@@ -83,7 +138,7 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 //
 // clients may be nil, in which case no loaders are built — which is only ever
 // the case in tests of this middleware itself.
-func Instrument(next http.Handler, clients *Clients, metrics *Metrics, log *slog.Logger, timeout time.Duration) http.Handler {
+func Instrument(next http.Handler, clients *Clients, verifier *auth.Verifier, metrics *Metrics, log *slog.Logger, timeout time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -114,10 +169,13 @@ func Instrument(next http.Handler, clients *Clients, metrics *Metrics, log *slog
 
 		ctx = grpcx.WithRequestID(ctx, requestID)
 
-		viewer := r.Header.Get(ViewerHeader)
-		if viewer != "" {
-			ctx = WithViewer(ctx, viewer)
-		}
+		ctx = Authenticate(ctx, verifier, r.Header.Get(AuthorizationHeader))
+		viewer := Viewer(ctx)
+
+		// The address a per-source rate limit applies to. Recorded here
+		// because it is the last point at which the *HTTP* request exists; a
+		// resolver sees only a context.
+		ctx = WithClientKey(ctx, ClientKeyFromRequest(r))
 
 		// Loaders are built here, per request, and die with the context.
 		//
