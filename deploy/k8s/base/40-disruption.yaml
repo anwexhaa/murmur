@@ -1,0 +1,48 @@
+# Budgets for voluntary disruption.
+#
+# These do nothing about a node dying; they constrain what the cluster is
+# allowed to do *on purpose* -- a drain, an upgrade, a descheduler rebalancing
+# pods. Without one, `kubectl drain` will happily evict every gateway replica
+# at once because nothing told it not to.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gateway
+  namespace: murmur
+spec:
+  # minAvailable rather than maxUnavailable, and as an absolute number rather
+  # than a percentage. Under an HPA the replica count moves, and a percentage
+  # would silently allow more eviction the busier the service got -- loosest
+  # exactly when it should be tightest.
+  minAvailable: 2
+  selector:
+    matchLabels: { app: gateway }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: timeline-svc
+  namespace: murmur
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: timeline-svc }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: social-svc
+  namespace: murmur
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: social-svc }
+---
+# The fanout worker deliberately has no budget.
+#
+# It is a queue consumer. Evicting all of it stops progress and loses nothing:
+# JetStream holds the backlog, unacknowledged messages are redelivered, and
+# the timeline writes are idempotent so a redelivery is free. Phase 3 made
+# that true and tested it across ten kill-restart cycles; a disruption budget
+# here would protect something that does not need protecting, and would block
+# a node drain to do it.

@@ -1,0 +1,21 @@
+# Scrape config for the local stack.
+#
+# Static targets rather than service discovery: the compose stack has four
+# processes at known names, and a Kubernetes SD config here would be a
+# description of a cluster this file is not pointed at. The k8s manifests
+# carry prometheus.io/scrape annotations for that case instead.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: murmur
+    static_configs:
+      - targets: ["murmur-gateway:8080"]
+        labels: { service: gateway }
+      - targets: ["murmur-social:8081"]
+        labels: { service: social-svc }
+      - targets: ["murmur-timeline:8082"]
+        labels: { service: timeline-svc }
+      - targets: ["murmur-fanout:8083"]
+        labels: { service: fanout-worker }

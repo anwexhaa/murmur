@@ -107,6 +107,10 @@ type Redis struct {
 	DB          int
 	PoolSize    int
 	DialTimeout time.Duration
+	// OpTimeout bounds a single command. Short, because a caller upstream has
+	// a budget and the answer "Redis is not there" should arrive well inside
+	// it -- see kv.Open.
+	OpTimeout time.Duration
 }
 
 // NATS holds the event bus settings.
@@ -210,11 +214,16 @@ func Load(service, defaultHTTPAddr string) (Config, error) {
 		},
 
 		Redis: Redis{
-			Addr:        p.str("REDIS_ADDR", "localhost:6379"),
-			Password:    p.str("REDIS_PASSWORD", ""),
-			DB:          p.num("REDIS_DB", 0),
-			PoolSize:    p.num("REDIS_POOL_SIZE", 32),
-			DialTimeout: p.dur("REDIS_DIAL_TIMEOUT", 5*time.Second),
+			Addr:     p.str("REDIS_ADDR", "localhost:6379"),
+			Password: p.str("REDIS_PASSWORD", ""),
+			DB:       p.num("REDIS_DB", 0),
+			PoolSize: p.num("REDIS_POOL_SIZE", 32),
+			// Both short on purpose. The gateway's per-call budget for a
+			// downstream service is three seconds; discovering that Redis is
+			// unreachable must cost a small fraction of that, or the
+			// fallback never gets a chance to run.
+			DialTimeout: p.dur("REDIS_DIAL_TIMEOUT", 500*time.Millisecond),
+			OpTimeout:   p.dur("REDIS_OP_TIMEOUT", 500*time.Millisecond),
 		},
 
 		NATS: NATS{

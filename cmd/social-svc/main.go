@@ -108,9 +108,15 @@ func run() error {
 		Metrics:  social.NewRelayMetrics(registry),
 	})
 
+	// Postgres is on readiness here, and the asymmetry with the gateway is
+	// the point rather than an inconsistency. This service is the source of
+	// truth: without its pool it can answer nothing, and a replica whose pool
+	// has broken while its siblings' pools are healthy is exactly the case
+	// readiness exists for. NATS is not checked, for the same reason the
+	// gateway does not check it -- the outbox relay falling behind is a
+	// backlog to alert on, not a reason to stop serving reads.
 	checks := health.New(2 * time.Second)
 	checks.Register("postgres", pool.Ping)
-	checks.Register("nats", events.Healthy)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.LiveHandler())

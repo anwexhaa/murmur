@@ -272,6 +272,56 @@ LOADTEST_SCENARIO ?= baseline
 loadtest: ## Run a k6 scenario (make loadtest SCENARIO=baseline|viral)
 	@AUTH_SIGNING_KEY="$(DEV_AUTH_SIGNING_KEY)" sh scripts/loadtest.sh $(or $(SCENARIO),$(LOADTEST_SCENARIO))
 
+# ------------------------------------------------------------------ cluster
+#
+# A single-node k3s in a container. Real kubelet, real scheduler, real HPA,
+# and no cloud account. Its kubeconfig stays inside the container and every
+# command below reaches it through docker exec, so nothing here can touch a
+# kubectl context somebody is actually using.
+K3S_IMAGE ?= rancher/k3s:v1.31.4-k3s1
+KUBECTL = $(DOCKER) exec -i murmur-k3s kubectl
+SERVICES = gateway social-svc timeline-svc fanout-worker migrate
+
+.PHONY: images cluster-up cluster-images cluster-down kubectl chaos
+images: ## Build the distroless images
+	@for svc in $(SERVICES); do \
+		printf "%-15s " "$$svc"; \
+		$(DOCKER) build -q -f deploy/Dockerfile --build-arg SERVICE=$$svc -t murmur/$$svc:dev . | cut -c1-19; \
+	done
+	@$(DOCKER) images --format "{{.Repository}}:{{.Tag}}	{{.Size}}" | grep "^murmur/"
+
+cluster-images: images ## Push the images into the cluster's containerd
+	@for svc in $(SERVICES); do \
+		$(DOCKER) save murmur/$$svc:dev | $(DOCKER) exec -i murmur-k3s ctr -n k8s.io images import - >/dev/null; \
+		echo "imported $$svc"; \
+	done
+
+cluster-up: ## Start k3s, load the images and apply the manifests
+	@$(DOCKER) rm -f murmur-k3s >/dev/null 2>&1 || true
+	$(DOCKER) run -d --privileged --name murmur-k3s \
+		--tmpfs /run --tmpfs /var/run \
+		-p 6550:6443 -p 30080:30080 \
+		-v murmur-k3s:/var/lib/rancher/k3s \
+		$(K3S_IMAGE) server --disable=traefik --disable=servicelb --tls-san=127.0.0.1
+	@echo "waiting for the api server"
+	@i=0; while [ $$i -lt 40 ]; do $(KUBECTL) get nodes >/dev/null 2>&1 && break; i=$$((i+1)); sleep 3; done
+	$(MAKE) cluster-images
+	@for f in deploy/k8s/base/*.yaml deploy/k8s/local/*.yaml; do $(KUBECTL) apply -f - < $$f; done
+	@echo
+	@echo "KEDA provides the JetStream lag scaler; without it the ScaledObject is inert."
+	@$(KUBECTL) apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.16.1/keda-2.16.1.yaml >/dev/null
+	@echo "the gateway will be on http://localhost:30080 once the pods are ready"
+
+cluster-down: ## Remove the cluster and its volume
+	@$(DOCKER) rm -f murmur-k3s >/dev/null 2>&1 || true
+	@$(DOCKER) volume rm murmur-k3s >/dev/null 2>&1 || true
+
+kubectl: ## Run kubectl against the local cluster (make kubectl ARGS="get pods -n murmur")
+	@$(KUBECTL) $(ARGS)
+
+chaos: ## Run the chaos experiments (make chaos EXPERIMENT=pod|redis|nats|all)
+	@sh scripts/chaos.sh $(or $(EXPERIMENT),all)
+
 .PHONY: clean
 clean: ## Remove build output
 	rm -rf bin coverage.out

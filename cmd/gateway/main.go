@@ -120,8 +120,17 @@ func run() error {
 	var limiter *ratelimit.Limiter
 	if cfg.RateLimit {
 		limiter = ratelimit.New(redis, ratelimit.NewMetrics(registry), nil)
+		// Preloading the script is an optimisation, not a prerequisite.
+		//
+		// Allow already handles NOSCRIPT by falling back to EVAL, which
+		// loads the script on demand -- that path exists because Redis
+		// forgets scripts on restart, and an unreachable Redis is the same
+		// situation with a longer outage. Treating this as fatal made a
+		// gateway unable to start during a Redis incident, which is the one
+		// time being unable to start hurts most.
 		if err := limiter.Prepare(ctx); err != nil {
-			return fmt.Errorf("rate limiter: %w", err)
+			log.Warn("could not preload the rate limit script; it will load on first use",
+				"error", err)
 		}
 	} else {
 		log.Warn("rate limiting is disabled; every limit is unenforced")
@@ -206,9 +215,28 @@ func run() error {
 	mux.Handle("GET /healthz", health.LiveHandler())
 	mux.Handle("GET /metrics", registry.Handler())
 
+	// The gateway's readiness deliberately checks neither Redis nor NATS.
+	//
+	// Readiness answers one question: should this pod receive traffic? It is
+	// only useful when a *different* replica would do better, and for a
+	// stateless edge whose dependencies are shared by every replica, failing
+	// on a dependency takes the whole Service out of rotation at once. A
+	// phase 8 chaos run found exactly that: Redis was scaled to zero, all
+	// three gateways went NotReady, the Service lost every endpoint, and the
+	// timeline fallback that had been built for precisely this outage never
+	// ran because nothing could reach the pod that would have used it. The
+	// probe turned a degradation into a connection refused.
+	//
+	// What the gateway actually needs Redis for is rate limiting, which fails
+	// open by design; NATS is needed for subscriptions, and a gateway that
+	// cannot serve subscriptions can still serve every query and mutation.
+	// Neither is a reason to stop accepting traffic.
+	//
+	// The dependency health is still visible -- murmur_ratelimit_failures_total
+	// counts the first, and the NATS connection state the second. Visible is
+	// the right place for it. An alert should fire; a load balancer should
+	// not act.
 	checks := health.New(2 * time.Second)
-	checks.Register("redis", func(ctx context.Context) error { return redis.Ping(ctx).Err() })
-	checks.Register("nats", events.Healthy)
 	mux.Handle("GET /readyz", checks.ReadyHandler())
 
 	// otelhttp opens the root span; Instrument then adds the request ID,

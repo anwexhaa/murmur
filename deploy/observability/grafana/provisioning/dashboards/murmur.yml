@@ -1,0 +1,9 @@
+# Provisioned from disk rather than clicked together in the UI, so the
+# dashboard is in the git history and a reviewer can see it change.
+apiVersion: 1
+providers:
+  - name: murmur
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

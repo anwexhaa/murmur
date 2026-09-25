@@ -316,6 +316,36 @@ func (s *Store) ListAuthorPosts(ctx context.Context, author uuid.UUID, after str
 	return collectPosts(rows, limit)
 }
 
+// ListFollowedPosts assembles a timeline from the source of truth.
+//
+// One query, not one per followee. The join runs inside Postgres, where the
+// planner can use the follows primary key to find the followees and
+// posts_by_author to walk each one's posts in ID order -- which is creation
+// order, because the IDs are ULIDs. The phase 2 gateway did this with N round
+// trips and no index help; this is the same answer computed properly.
+//
+// It is still meaningfully slower than reading a materialised timeline out of
+// Redis, and it is meant to be: it exists so that losing the derived view
+// costs latency rather than availability.
+func (s *Store) ListFollowedPosts(ctx context.Context, viewer uuid.UUID, after string, limit int) ([]domain.Post, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT p.id, p.author_id, p.body, p.created_at
+		   FROM posts p
+		   JOIN follows f ON f.followee_id = p.author_id
+		  WHERE f.follower_id = $1
+		    AND p.deleted_at IS NULL
+		    AND ($2 = '' OR p.id < $2)
+		  ORDER BY p.id DESC
+		  LIMIT $3`,
+		viewer, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query followed posts: %w", err)
+	}
+	defer rows.Close()
+
+	return collectPosts(rows, limit)
+}
+
 // ------------------------------------------------------------ bulk load
 
 // FollowEdge is one row for the bulk loader.

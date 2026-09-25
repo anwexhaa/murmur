@@ -34,4 +34,14 @@ message GetTimelineResponse {
   // wrong. Reporting it rather than hiding it is what makes that measurable
   // instead of mysterious.
   int32 ids_read = 3;
+
+  // True when this page was assembled from Postgres because the materialised
+  // timeline was unavailable.
+  //
+  // Reported rather than hidden, for the same reason as ids_read. A client
+  // that knows it is reading a degraded path can say so; more importantly, a
+  // load test that does not check this cannot tell the difference between
+  // "the fallback worked" and "the fallback was never exercised", which is the
+  // difference between a chaos experiment and a green tick.
+  bool degraded = 4;
 }

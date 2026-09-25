@@ -42,6 +42,15 @@ service SocialService {
   rpc BatchGetPosts(BatchGetPostsRequest) returns (BatchGetPostsResponse);
   rpc ListAuthorPosts(ListAuthorPostsRequest) returns (ListAuthorPostsResponse);
   rpc DeletePost(DeletePostRequest) returns (DeletePostResponse);
+
+  // ListFollowedPosts assembles a timeline straight from the source of truth.
+  //
+  // This is the phase 2 design, kept deliberately. Redis holds every timeline
+  // in this system and a derived view is allowed to be unavailable, but the
+  // data it derives from is not -- so when Redis is gone the read path falls
+  // back to one SQL query against posts and follows rather than returning an
+  // error. It is slower, by an amount phase 8 measures, and it is correct.
+  rpc ListFollowedPosts(ListFollowedPostsRequest) returns (ListFollowedPostsResponse);
 }
 
 message User {
@@ -220,6 +229,20 @@ message BatchGetPostsRequest {
 
 message BatchGetPostsResponse {
   map<string, Post> posts = 1;
+}
+
+message ListFollowedPostsRequest {
+  string user_id = 1;
+  int32 page_size = 2;
+  // A post ID: results are strictly older than this. ULIDs sort by creation
+  // time, so the cursor is the same one the materialised path uses and a
+  // client cannot tell which path served it.
+  string page_token = 3;
+}
+
+message ListFollowedPostsResponse {
+  repeated Post posts = 1;
+  string next_page_token = 2;
 }
 
 message ListAuthorPostsRequest {

@@ -1,0 +1,106 @@
+# The gateway scales on CPU, which is the right signal for it: it is
+# request-driven, its work is proportional to requests, and CPU is what runs
+# out first.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+  namespace: murmur
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Against the request, not the limit. 65% leaves room for the burst
+          # between a load increase and the new pods being ready.
+          averageUtilization: 65
+  behavior:
+    scaleUp:
+      # React quickly on the way up: the cost of one pod too many is pennies,
+      # and the cost of one too few is every request queueing behind it.
+      stabilizationWindowSeconds: 30
+      policies:
+        - { type: Percent, value: 100, periodSeconds: 30 }
+    scaleDown:
+      # Slowly on the way down. The gateway holds WebSocket connections, and
+      # every scale-down drops the ones on the pod that goes -- so a flapping
+      # autoscaler is felt by users rather than by a graph.
+      stabilizationWindowSeconds: 300
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 60 }
+---
+# The fanout worker does not scale on CPU, and that is the interesting part.
+#
+# Its work arrives as a queue. CPU utilisation tells you how hard the workers
+# currently running are being pushed; it says nothing about how far behind
+# they are, and those come apart exactly when it matters. One worker saturated
+# at 100% CPU with an empty queue needs no help. One worker at 40% CPU with
+# 200,000 events behind it -- because each fanout is bounded by Redis round
+# trips rather than by the CPU -- needs a great deal of help, and a CPU-based
+# autoscaler will never give it any.
+#
+# The signal that matters is consumer lag: how much work JetStream is holding
+# that nobody has acknowledged. KEDA reads it directly.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fanout-worker
+  namespace: murmur
+spec:
+  scaleTargetRef:
+    name: fanout-worker
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  # Longer than one fanout takes at the threshold, so a worker is never
+  # removed in the middle of the largest unit of work it can be given.
+  cooldownPeriod: 120
+  pollingInterval: 10
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats.murmur.svc.cluster.local:8222"
+        account: "$G"
+        stream: "POSTS"
+        consumer: "fanout"
+        # Messages outstanding per replica. Low, because each one can be a
+        # fanout to ten thousand followers -- a backlog of a hundred is not a
+        # hundred small tasks, it is potentially a million Redis writes.
+        lagThreshold: "50"
+---
+# The same idea written for a cluster without KEDA, kept because it is the
+# question an interviewer asks next.
+#
+# An HPA can scale on an external metric if something publishes it, so this
+# works wherever prometheus-adapter is installed. It is strictly more moving
+# parts than the ScaledObject above -- Prometheus, the adapter, a rule, and
+# the custom metrics API -- which is why KEDA is the default here and this is
+# the fallback rather than the other way round.
+#
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: fanout-worker
+#   namespace: murmur
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: fanout-worker
+#   minReplicas: 1
+#   maxReplicas: 10
+#   metrics:
+#     - type: External
+#       external:
+#         metric:
+#           name: murmur_fanout_consumer_outstanding
+#         target:
+#           type: AverageValue
+#           averageValue: "50"

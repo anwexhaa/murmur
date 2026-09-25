@@ -21,7 +21,7 @@ The full build plan lives in [`docs/build-spec.html`](docs/build-spec.html).
 | 05 | Caching and the read path | **done** |
 | 06 | Real-time subscriptions | **done** |
 | 07 | Auth and hardening | **done** |
-| 08 | Deploy, observe, prove | not started |
+| 08 | Deploy, observe, prove | **done** |
 
 ## Quickstart
 
@@ -64,6 +64,19 @@ The seeded accounts have no passwords — `cmd/seed` writes them with `COPY` and
 hashing six hundred thousand of them is argon2 working in the one place nobody
 wants it to. `go run scripts/mint.go -viewer <id>` signs a token for one of
 them, which is what the load tests and the phase 6 scripts use.
+
+Metrics are at <http://localhost:9090> and the dashboard at
+<http://localhost:3001/d/murmur-overview/murmur>.
+
+To run it on a real cluster — a single-node k3s in a container, with its own
+kubeconfig so it cannot touch a context you are using:
+
+```bash
+make cluster-up                          # k3s, images, manifests, KEDA
+make kubectl ARGS="get pods -n murmur"
+make chaos                               # the three chaos experiments
+make cluster-down
+```
 
 ```bash
 make smoke                               # end-to-end gRPC flow
@@ -155,6 +168,11 @@ attached, because a number without its conditions is not evidence.
 | Unknown account vs wrong password | 154 ms vs **148 ms** | 07 | decoy hash; without it the gap is a handle-enumeration oracle |
 | Concurrent rotations of one token | 8 → **1 succeeds** | 07 | `FOR UPDATE`; the other 7 correctly read as reuse |
 | Concurrent callers vs a 20-token bucket | 200 → **20 allowed** | 07 | the limiter is a Lua script for exactly this reason |
+| **Failed requests during a pod kill** | **0 of 949** | 08 | [phase8](docs/phase8-deploy.md); 4 readers, gateway pod deleted at t=12s |
+| **Reads with Redis deleted** | **60 of 60**, mean 92 ms | 08 | degrades to one SQL query; was 47/60 at 1,376 ms before the breaker |
+| **Writes during a NATS partition** | **5 of 5** accepted | 08 | outbox drained in 4 s on recovery, nothing lost or duplicated |
+| Runtime image size | **37.5 – 43.9 MB** | 08 | distroless static; 28.2 MB is the binary, from a 1.31 GB builder |
+| Downstream calls, on a live dashboard | **3.98** | 08 | the phase 2–5 number, read off Grafana rather than a log |
 | Live delivery p50, one socket | **31.4 ms** | 06 | end to end from `createdAt`, 25 ms outbox poll |
 | Subscriptions per replica | **2,000** | 06 | 139.6 MiB, 0 failed, 0 dropped, 0 evicted |
 | Memory per connection | ~**66 KiB** | 06 | 64-slot buffer, evicts at 128 consecutive drops |

@@ -124,7 +124,12 @@ func run() error {
 		})
 
 	checks := health.New(2 * time.Second)
-	checks.Register("redis", func(ctx context.Context) error { return redis.Ping(ctx).Err() })
+	// The worker keeps both checks, and here they are honest: it exists to
+	// read from NATS and write to Redis, so without either it cannot do its
+	// job at all. Nothing routes traffic to it -- it has no Service -- so
+	// readiness here is a rollout signal and a dashboard, which is what it
+	// should be when there is no load balancer to mislead.
+	checks.Register("redis", kv.Reachable(redis, time.Second))
 	checks.Register("nats", events.Healthy)
 
 	mux := http.NewServeMux()

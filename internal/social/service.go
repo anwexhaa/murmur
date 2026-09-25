@@ -394,6 +394,37 @@ func (s *Service) ListAuthorPosts(ctx context.Context, req *socialv1.ListAuthorP
 	return &socialv1.ListAuthorPostsResponse{Posts: out, NextPageToken: token}, nil
 }
 
+// ListFollowedPosts serves the degraded read path. See the store method and
+// docs/phase8-deploy.md.
+func (s *Service) ListFollowedPosts(ctx context.Context, req *socialv1.ListFollowedPostsRequest) (*socialv1.ListFollowedPostsResponse, error) {
+	viewer, err := domain.ParseUserID("user_id", req.GetUserId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	if token := req.GetPageToken(); token != "" {
+		if err := domain.ValidatePostID("page_token", token); err != nil {
+			return nil, toStatus(err)
+		}
+	}
+
+	limit := clampPageSize(req.GetPageSize())
+	posts, err := s.store.ListFollowedPosts(ctx, viewer, req.GetPageToken(), limit)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+
+	out := make([]*socialv1.Post, len(posts))
+	for i, post := range posts {
+		out[i] = postToProto(post)
+	}
+
+	token := ""
+	if len(posts) == limit {
+		token = posts[len(posts)-1].ID
+	}
+	return &socialv1.ListFollowedPostsResponse{Posts: out, NextPageToken: token}, nil
+}
+
 func (s *Service) DeletePost(ctx context.Context, req *socialv1.DeletePostRequest) (*socialv1.DeletePostResponse, error) {
 	if err := domain.ValidatePostID("id", req.GetId()); err != nil {
 		return nil, toStatus(err)

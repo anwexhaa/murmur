@@ -36,6 +36,7 @@ const (
 	SocialService_BatchGetPosts_FullMethodName          = "/murmur.social.v1.SocialService/BatchGetPosts"
 	SocialService_ListAuthorPosts_FullMethodName        = "/murmur.social.v1.SocialService/ListAuthorPosts"
 	SocialService_DeletePost_FullMethodName             = "/murmur.social.v1.SocialService/DeletePost"
+	SocialService_ListFollowedPosts_FullMethodName      = "/murmur.social.v1.SocialService/ListFollowedPosts"
 )
 
 // SocialServiceClient is the client API for SocialService service.
@@ -78,6 +79,14 @@ type SocialServiceClient interface {
 	BatchGetPosts(ctx context.Context, in *BatchGetPostsRequest, opts ...grpc.CallOption) (*BatchGetPostsResponse, error)
 	ListAuthorPosts(ctx context.Context, in *ListAuthorPostsRequest, opts ...grpc.CallOption) (*ListAuthorPostsResponse, error)
 	DeletePost(ctx context.Context, in *DeletePostRequest, opts ...grpc.CallOption) (*DeletePostResponse, error)
+	// ListFollowedPosts assembles a timeline straight from the source of truth.
+	//
+	// This is the phase 2 design, kept deliberately. Redis holds every timeline
+	// in this system and a derived view is allowed to be unavailable, but the
+	// data it derives from is not -- so when Redis is gone the read path falls
+	// back to one SQL query against posts and follows rather than returning an
+	// error. It is slower, by an amount phase 8 measures, and it is correct.
+	ListFollowedPosts(ctx context.Context, in *ListFollowedPostsRequest, opts ...grpc.CallOption) (*ListFollowedPostsResponse, error)
 }
 
 type socialServiceClient struct {
@@ -258,6 +267,16 @@ func (c *socialServiceClient) DeletePost(ctx context.Context, in *DeletePostRequ
 	return out, nil
 }
 
+func (c *socialServiceClient) ListFollowedPosts(ctx context.Context, in *ListFollowedPostsRequest, opts ...grpc.CallOption) (*ListFollowedPostsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListFollowedPostsResponse)
+	err := c.cc.Invoke(ctx, SocialService_ListFollowedPosts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SocialServiceServer is the server API for SocialService service.
 // All implementations must embed UnimplementedSocialServiceServer
 // for forward compatibility.
@@ -298,6 +317,14 @@ type SocialServiceServer interface {
 	BatchGetPosts(context.Context, *BatchGetPostsRequest) (*BatchGetPostsResponse, error)
 	ListAuthorPosts(context.Context, *ListAuthorPostsRequest) (*ListAuthorPostsResponse, error)
 	DeletePost(context.Context, *DeletePostRequest) (*DeletePostResponse, error)
+	// ListFollowedPosts assembles a timeline straight from the source of truth.
+	//
+	// This is the phase 2 design, kept deliberately. Redis holds every timeline
+	// in this system and a derived view is allowed to be unavailable, but the
+	// data it derives from is not -- so when Redis is gone the read path falls
+	// back to one SQL query against posts and follows rather than returning an
+	// error. It is slower, by an amount phase 8 measures, and it is correct.
+	ListFollowedPosts(context.Context, *ListFollowedPostsRequest) (*ListFollowedPostsResponse, error)
 	mustEmbedUnimplementedSocialServiceServer()
 }
 
@@ -358,6 +385,9 @@ func (UnimplementedSocialServiceServer) ListAuthorPosts(context.Context, *ListAu
 }
 func (UnimplementedSocialServiceServer) DeletePost(context.Context, *DeletePostRequest) (*DeletePostResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeletePost not implemented")
+}
+func (UnimplementedSocialServiceServer) ListFollowedPosts(context.Context, *ListFollowedPostsRequest) (*ListFollowedPostsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFollowedPosts not implemented")
 }
 func (UnimplementedSocialServiceServer) mustEmbedUnimplementedSocialServiceServer() {}
 func (UnimplementedSocialServiceServer) testEmbeddedByValue()                       {}
@@ -686,6 +716,24 @@ func _SocialService_DeletePost_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SocialService_ListFollowedPosts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListFollowedPostsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SocialServiceServer).ListFollowedPosts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SocialService_ListFollowedPosts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SocialServiceServer).ListFollowedPosts(ctx, req.(*ListFollowedPostsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SocialService_ServiceDesc is the grpc.ServiceDesc for SocialService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -760,6 +808,10 @@ var SocialService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeletePost",
 			Handler:    _SocialService_DeletePost_Handler,
+		},
+		{
+			MethodName: "ListFollowedPosts",
+			Handler:    _SocialService_ListFollowedPosts_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

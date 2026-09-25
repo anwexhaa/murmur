@@ -51,3 +51,106 @@ jobs:
       # daemon, so this needs no service container declared here.
       - name: Test with the race detector
         run: go test -race -count=1 ./...
+
+  images:
+    name: build images
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [gateway, social-svc, timeline-svc, fanout-worker, migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Only authenticate on a push to main. A pull request from a fork has no
+      # write token, and a workflow that tries anyway fails on every external
+      # contribution for a reason that has nothing to do with the change.
+      - name: Log in to the registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          # Built on every pull request so a broken Dockerfile is caught by the
+          # change that broke it; pushed only from main.
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  loadtest:
+    name: k6 baseline gate
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # The stack, as close to the deployed shape as a runner allows.
+      - name: Start dependencies
+        run: docker compose -f deploy/docker-compose.yml up -d --wait postgres redis nats
+
+      - name: Migrate and seed
+        env:
+          POSTGRES_DSN: postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable
+        run: |
+          go run ./cmd/migrate up
+          go run ./cmd/seed -users 2000 -whale-followers 0
+
+      - name: Start the services
+        env:
+          POSTGRES_DSN: postgres://murmur:murmur@localhost:5432/murmur?sslmode=disable
+          REDIS_ADDR: localhost:6379
+          NATS_URL: nats://localhost:4222
+          SOCIAL_ADDR: localhost:9081
+          TIMELINE_ADDR: localhost:9082
+          AUTH_SIGNING_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+        run: |
+          go build -o /tmp/bin/ ./cmd/social-svc ./cmd/timeline-svc ./cmd/fanout-worker ./cmd/gateway
+          HTTP_ADDR=:8081 /tmp/bin/social-svc   & echo $! >> /tmp/pids
+          HTTP_ADDR=:8082 /tmp/bin/timeline-svc & echo $! >> /tmp/pids
+          HTTP_ADDR=:8083 /tmp/bin/fanout-worker & echo $! >> /tmp/pids
+          HTTP_ADDR=:8080 /tmp/bin/gateway      & echo $! >> /tmp/pids
+          for port in 8080 8081 8082 8083; do
+            for _ in $(seq 1 30); do
+              curl -sf "http://localhost:$port/healthz" >/dev/null && break
+              sleep 1
+            done
+          done
+
+      # The gate. k6's own thresholds decide pass or fail, so a regression in
+      # p95 or error rate fails the build rather than being noticed later in a
+      # graph nobody was looking at.
+      - name: k6 baseline
+        env:
+          AUTH_SIGNING_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+          GATEWAY: http://localhost:8080
+          NETWORK: host
+          TIMELINE_METRICS: http://localhost:8082/metrics
+        run: sh scripts/loadtest.sh baseline
+
+      - name: Stop the services
+        if: always()
+        run: xargs -r kill < /tmp/pids || true

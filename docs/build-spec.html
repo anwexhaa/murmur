@@ -1102,7 +1102,10 @@
               <tr><td>Hostile 4-level query</td><td class="mono">90,800</td><td class="mono">rejected at 2,000</td><td class="mono">07</td><td>Complexity budget; a depth cap allows it</td></tr>
               <tr><td>Unknown account vs wrong password</td><td class="mono">154 ms</td><td class="mono">148 ms</td><td class="mono">07</td><td>Decoy argon2 hash closes the timing oracle</td></tr>
               <tr><td>Concurrent rotations of one token</td><td class="mono">8</td><td class="mono">1 succeeds</td><td class="mono">07</td><td>SELECT ... FOR UPDATE, real Postgres</td></tr>
-              <tr><td>Failed requests during pod kill</td><td class="mono">—</td><td class="mono">0</td><td class="mono">08</td><td>Chaos experiment under load</td></tr>
+              <tr><td>Failed requests during pod kill</td><td class="mono">&mdash;</td><td class="mono">0 of 949</td><td class="mono">08</td><td>4 readers, gateway pod deleted mid-flight</td></tr>
+              <tr><td>Reads with Redis deleted</td><td class="mono">47/60 @ 1,376 ms</td><td class="mono">60/60 @ 92 ms</td><td class="mono">08</td><td>No retries + circuit breaker; degrades to SQL</td></tr>
+              <tr><td>Writes during a NATS partition</td><td class="mono">&mdash;</td><td class="mono">5 of 5</td><td class="mono">08</td><td>Outbox drained in 4s, nothing lost</td></tr>
+              <tr><td>Runtime image size</td><td class="mono">1.31 GB builder</td><td class="mono">37.5&ndash;43.9 MB</td><td class="mono">08</td><td>Distroless static; 28.2 MB is the binary</td></tr>
             </tbody>
           </table>
         </div>
@@ -1130,6 +1133,8 @@
         <p class="cvline">Replaced a trusted plaintext identity header with argon2id credentials, Ed25519-signed access tokens and single-use refresh tokens whose replay revokes the whole session family, and put signed caller assertions on every internal gRPC hop so a backend refuses anything that did not come through the gateway &mdash; verified by presenting a real user's own token to the backend and watching it fail on the audience claim.</p>
 
         <p class="cvline">Priced the GraphQL schema by complexity rather than depth, so a four-level query asking for <em>10,000</em> authors scores <em>90,800</em> against a <em>2,000</em> budget and is rejected where a depth limit would have allowed it; added a Redis Lua token bucket that held <em>200</em> concurrent callers to exactly <em>20</em>.</p>
+
+        <p class="cvline">Deployed four services to Kubernetes from distroless images and proved the failure modes rather than asserting them: deleting a gateway pod under load failed <em>0</em> of <em>949</em> requests, and deleting Redis outright served <em>60</em> of <em>60</em> reads from Postgres &mdash; after chaos runs found that the readiness probe, the startup ping and the retry policy each turned that degradation back into an outage.</p>
 
         <div class="callout">
           <p><strong>On the cover letter.</strong> The JD says no experience required, which means the projects carry the application. Lead with the threshold benchmark — it is the one thing in your portfolio that is specifically about <em>their</em> problem, and it demonstrates the habit they're hiring for: you didn't pick a number, you measured one.</p>

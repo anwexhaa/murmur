@@ -1,0 +1,39 @@
+# Migrations run as a Job, not as an init container on every service.
+#
+# An init container would run the migration once per replica and once per
+# restart, racing itself: goose takes an advisory lock so the outcome is
+# correct, but every pod would then wait on that lock to start, and a
+# rollout's speed would depend on how many replicas happened to be scheduled
+# first. A Job runs it once, and the services wait for the Job rather than for
+# each other.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: murmur
+  annotations:
+    # Re-applying the manifests replaces the Job rather than failing on an
+    # immutable field. In a real pipeline this is a Helm hook or an Argo sync
+    # wave; here the intent is the same and the mechanism is one annotation.
+    murmur.dev/replace-on-apply: "true"
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          # Its own image, and the schema is compiled into the binary -- the
+          # distroless base has no filesystem for it to read SQL from.
+          image: murmur/migrate:dev
+          # Never pull: these images are built locally and pushed into the
+          # cluster, and a default policy would send k3s to Docker Hub looking
+          # for a repository that does not exist.
+          imagePullPolicy: IfNotPresent
+          args: ["up"]
+          envFrom:
+            - configMapRef: { name: murmur-config }
+            - secretRef: { name: murmur-secrets }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }

@@ -1,0 +1,208 @@
+{
+  "title": "Murmur",
+  "uid": "murmur-overview",
+  "tags": ["murmur"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "The read path",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Timeline read p99, by path",
+      "description": "The materialised path reads one Redis range; the source path assembles the page from Postgres because Redis was unavailable. Plotted together because the gap between them is the cost of degrading, and a single averaged line would hide it.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, path) (rate(murmur_timeline_read_seconds_bucket[1m])))",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Reads by path",
+      "description": "A ratio, not a count. 'The fallback fired 4,000 times' means nothing without knowing whether that was four percent of traffic or all of it.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "expr": "sum by (path) (rate(murmur_timeline_reads_total[1m]))",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Degraded",
+      "description": "1 while the materialised read path is unavailable. A gauge rather than a counter, because the question at 3am is 'is it happening now' and a counter can only answer 'has it ever'.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "max(murmur_timeline_degraded)" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Downstream gRPC calls per GraphQL request",
+      "description": "The number phases 2 through 5 exist to move: 163 naive, 4 after batching. Plotted as a p99 so one expensive query is visible rather than averaged away.",
+      "gridPos": { "h": 8, "w": 10, "x": 4, "y": 9 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, operation) (rate(murmur_gateway_downstream_calls_per_request_bucket[1m])))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Post cache hit ratio by tier",
+      "description": "local is the in-process LRU, redis is shared across replicas, source is the only tier that costs a database read. The claim of phase 5 is that source stays flat while readers climb.",
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 } },
+      "targets": [
+        {
+          "expr": "sum by (tier) (rate(murmur_postcache_lookups_total[1m])) / ignoring(tier) group_left sum(rate(murmur_postcache_lookups_total[1m]))",
+          "legendFormat": "{{tier}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Fanout",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Fanout duration p99, by follower bucket",
+      "description": "Bucketed by author size because that is the variable: the same code takes 4ms for a hundred followers and twenty-four seconds for five hundred thousand, which is the whole argument for the phase 4 threshold.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, bucket) (rate(murmur_fanout_duration_seconds_bucket[1m])))",
+          "legendFormat": "{{bucket}} followers"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "JetStream consumer backlog",
+      "description": "Undelivered plus in-flight, which is what KEDA scales on. Reporting only undelivered made a twenty-four-second fanout read as zero in phase 4 — the instrumentation bug that started the habit of distrusting flattering numbers.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "targets": [
+        { "expr": "murmur_fanout_consumer_outstanding", "legendFormat": "outstanding" },
+        { "expr": "murmur_fanout_consumer_redelivered", "legendFormat": "redelivering" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Write amplification",
+      "description": "Follower timelines written per second. The phase 4 cutover took a single 500k-follower post from 500,000 writes to zero.",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 26 },
+      "targets": [
+        { "expr": "rate(murmur_fanout_timeline_writes_total[1m])", "legendFormat": "timeline writes/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox lag",
+      "description": "The oldest unpublished event's age. It is the gap between a post being committed and the world being told, and it stays flat unless the bus is gone — during the phase 8 NATS partition it grew for the length of the outage and drained in four seconds.",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "murmur_outbox_oldest_pending_seconds", "legendFormat": "oldest pending" },
+        { "expr": "murmur_outbox_pending_events", "legendFormat": "pending events" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Fanout outcomes",
+      "description": "Anything but ok is an event that will be redelivered or parked.",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 26 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(murmur_fanout_events_total[1m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Subscriptions and the edge",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Live subscription connections",
+      "description": "Per replica. Phase 6 held 2,000 on one gateway in 140 MiB.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 34 },
+      "targets": [
+        { "expr": "murmur_subscriptions_connections", "legendFormat": "{{instance}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Publish-to-client delivery p99",
+      "description": "From the post's own createdAt to the byte reaching a client's buffer, so the number covers the outbox poll, JetStream, the fanout and the socket rather than only the gateway.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 34 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(murmur_subscriptions_delivery_seconds_bucket[1m])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Backpressure",
+      "description": "Dropped is the policy working, not a failure; a rising rate means clients are slower than the timeline is moving. Evicted is a connection closed for falling too far behind.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 34 },
+      "targets": [
+        { "expr": "rate(murmur_subscriptions_dropped_total[1m])", "legendFormat": "dropped/s" },
+        { "expr": "rate(murmur_subscriptions_evicted_total[1m])", "legendFormat": "evicted/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate limit decisions",
+      "description": "The ratio of limited to allowed is what says whether a limit is protecting the service or breaking a legitimate client. failures_total is requests allowed because Redis was unreachable — the limiter fails open, and that counter is where the alert belongs.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 42 },
+      "targets": [
+        {
+          "expr": "sum by (scope, outcome) (rate(murmur_ratelimit_decisions_total[1m]))",
+          "legendFormat": "{{scope}} {{outcome}}"
+        },
+        { "expr": "rate(murmur_ratelimit_failures_total[1m])", "legendFormat": "limiter unavailable" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway request duration p99",
+      "description": "By GraphQL operation rather than by path, because every request is a POST to /query and the path carries no information at all.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 42 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, operation) (rate(murmur_gateway_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "{{operation}}"
+        }
+      ]
+    }
+  ]
+}

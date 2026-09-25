@@ -1,0 +1,13 @@
+# Build output and local state. bin/ holds Linux binaries and a 78MB buf.exe;
+# shipping them into the build context would copy ~300MB per image build for
+# files the build does not read.
+bin/
+*.exe
+.git/
+.github/
+docs/
+loadtest/
+coverage.out
+*.prof
+.env
+.env.local

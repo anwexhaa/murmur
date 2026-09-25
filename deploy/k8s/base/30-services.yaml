@@ -1,0 +1,283 @@
+# The three long-lived services.
+#
+# A note that applies to all of them: liveness and readiness check different
+# things on purpose.
+#
+#   /healthz (liveness)  -- is this process still a process? No dependencies.
+#   /readyz  (readiness) -- should this pod receive traffic? Dependencies.
+#
+# Getting that backwards is one of the most effective ways to turn a dependency
+# blip into a full outage: a liveness probe that checks Postgres will restart
+# every replica the moment Postgres hiccups, and a restart storm is a far worse
+# thing to be having than a slow database.
+apiVersion: v1
+kind: Service
+metadata:
+  name: social-svc
+  namespace: murmur
+spec:
+  selector: { app: social-svc }
+  ports:
+    - { name: grpc, port: 9081, targetPort: 9081 }
+    - { name: http, port: 8081, targetPort: 8081 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: social-svc
+  namespace: murmur
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: social-svc }
+  template:
+    metadata:
+      labels: { app: social-svc }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: social-svc
+          image: murmur/social-svc:dev
+          # Never pull: these images are built locally and pushed into the
+          # cluster, and a default policy would send k3s to Docker Hub looking
+          # for a repository that does not exist.
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: murmur-config }
+            - secretRef: { name: murmur-secrets }
+          env:
+            - { name: HTTP_ADDR, value: ":8081" }
+          ports:
+            - { name: grpc, containerPort: 9081 }
+            - { name: http, containerPort: 8081 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8081 }
+            periodSeconds: 10
+            # Three misses before a restart. One missed probe is a garbage
+            # collection pause.
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 }
+            periodSeconds: 5
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 96Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: timeline-svc
+  namespace: murmur
+spec:
+  selector: { app: timeline-svc }
+  ports:
+    - { name: grpc, port: 9082, targetPort: 9082 }
+    - { name: http, port: 8082, targetPort: 8082 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: timeline-svc
+  namespace: murmur
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: timeline-svc }
+  template:
+    metadata:
+      labels: { app: timeline-svc }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: timeline-svc
+          image: murmur/timeline-svc:dev
+          # Never pull: these images are built locally and pushed into the
+          # cluster, and a default policy would send k3s to Docker Hub looking
+          # for a repository that does not exist.
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: murmur-config }
+            - secretRef: { name: murmur-secrets }
+          env:
+            - { name: HTTP_ADDR, value: ":8082" }
+          ports:
+            - { name: grpc, containerPort: 9082 }
+            - { name: http, containerPort: 8082 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8082 }
+            periodSeconds: 10
+            failureThreshold: 3
+          # Redis is deliberately not part of this service's readiness. From
+          # phase 8 it serves timelines out of Postgres when Redis is gone, so
+          # failing readiness would pull every replica out of rotation during
+          # exactly the incident the fallback exists for.
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8082 }
+            periodSeconds: 5
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: murmur
+spec:
+  selector: { app: gateway }
+  ports:
+    - { name: http, port: 80, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: murmur
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: gateway }
+  strategy:
+    rollingUpdate:
+      # Never fewer than the declared replicas during a rollout. The gateway
+      # holds WebSocket connections; taking one down before its replacement is
+      # serving would drop those connections for no reason.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels: { app: gateway }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      # Long enough to drain WebSockets.
+      #
+      # A subscription is not a request; it is open until the client closes it
+      # or the server does. On SIGTERM the process stops accepting and lets
+      # in-flight work finish, and this is the window it gets -- longer than
+      # SHUTDOWN_TIMEOUT so the process always decides when it is done rather
+      # than being killed mid-decision.
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: gateway
+          image: murmur/gateway:dev
+          # Never pull: these images are built locally and pushed into the
+          # cluster, and a default policy would send k3s to Docker Hub looking
+          # for a repository that does not exist.
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: murmur-config }
+            - secretRef: { name: murmur-secrets }
+          env:
+            - { name: HTTP_ADDR, value: ":8080" }
+          ports:
+            - { name: http, containerPort: 8080 }
+          lifecycle:
+            preStop:
+              # Endpoint removal and SIGTERM race: kubelet sends the signal
+              # while kube-proxy is still updating rules, so a connection can
+              # arrive at a pod that has already stopped accepting. Sleeping
+              # first lets the removal propagate, and *then* the process is
+              # asked to stop. This is the difference between "zero failed
+              # requests during a pod kill" and "almost zero".
+              sleep: { seconds: 5 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            # The request is what the scheduler packs on and what the HPA
+            # measures against. No CPU limit on purpose: a limit throttles at
+            # the quota boundary, and a gateway that is briefly allowed to
+            # burst serves the burst instead of queueing it.
+            requests: { cpu: 200m, memory: 128Mi }
+            limits: { memory: 768Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fanout-worker
+  namespace: murmur
+spec:
+  # One by default; KEDA scales it on JetStream lag. See 50-autoscaling.yaml.
+  replicas: 1
+  selector:
+    matchLabels: { app: fanout-worker }
+  template:
+    metadata:
+      labels: { app: fanout-worker }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      # A fanout to 10,000 followers is one indivisible unit of work that
+      # takes about half a second (ADR-001). This is generous against that, so
+      # a worker being rescheduled never leaves a post half fanned out -- not
+      # that it would matter, because the writes are idempotent and JetStream
+      # would redeliver, but a shutdown that finishes its work produces no
+      # redelivery to reason about.
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: fanout-worker
+          image: murmur/fanout-worker:dev
+          # Never pull: these images are built locally and pushed into the
+          # cluster, and a default policy would send k3s to Docker Hub looking
+          # for a repository that does not exist.
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: murmur-config }
+            - secretRef: { name: murmur-secrets }
+          env:
+            - { name: HTTP_ADDR, value: ":8083" }
+          ports:
+            - { name: http, containerPort: 8083 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8083 }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8083 }
+            periodSeconds: 5
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 200m, memory: 96Mi }
+            limits: { memory: 512Mi }

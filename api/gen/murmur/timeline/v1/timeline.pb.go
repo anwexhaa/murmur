@@ -94,7 +94,16 @@ type GetTimelineResponse struct {
 	// fanned out — the timeline is a derived view and is allowed to be briefly
 	// wrong. Reporting it rather than hiding it is what makes that measurable
 	// instead of mysterious.
-	IdsRead       int32 `protobuf:"varint,3,opt,name=ids_read,json=idsRead,proto3" json:"ids_read,omitempty"`
+	IdsRead int32 `protobuf:"varint,3,opt,name=ids_read,json=idsRead,proto3" json:"ids_read,omitempty"`
+	// True when this page was assembled from Postgres because the materialised
+	// timeline was unavailable.
+	//
+	// Reported rather than hidden, for the same reason as ids_read. A client
+	// that knows it is reading a degraded path can say so; more importantly, a
+	// load test that does not check this cannot tell the difference between
+	// "the fallback worked" and "the fallback was never exercised", which is the
+	// difference between a chaos experiment and a green tick.
+	Degraded      bool `protobuf:"varint,4,opt,name=degraded,proto3" json:"degraded,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -150,6 +159,13 @@ func (x *GetTimelineResponse) GetIdsRead() int32 {
 	return 0
 }
 
+func (x *GetTimelineResponse) GetDegraded() bool {
+	if x != nil {
+		return x.Degraded
+	}
+	return false
+}
+
 var File_murmur_timeline_v1_timeline_proto protoreflect.FileDescriptor
 
 const file_murmur_timeline_v1_timeline_proto_rawDesc = "" +
@@ -159,11 +175,12 @@ const file_murmur_timeline_v1_timeline_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\x86\x01\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\xa2\x01\n" +
 	"\x13GetTimelineResponse\x12,\n" +
 	"\x05posts\x18\x01 \x03(\v2\x16.murmur.social.v1.PostR\x05posts\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12\x19\n" +
-	"\bids_read\x18\x03 \x01(\x05R\aidsRead2q\n" +
+	"\bids_read\x18\x03 \x01(\x05R\aidsRead\x12\x1a\n" +
+	"\bdegraded\x18\x04 \x01(\bR\bdegraded2q\n" +
 	"\x0fTimelineService\x12^\n" +
 	"\vGetTimeline\x12&.murmur.timeline.v1.GetTimelineRequest\x1a'.murmur.timeline.v1.GetTimelineResponseB\xd3\x01\n" +
 	"\x16com.murmur.timeline.v1B\rTimelineProtoP\x01Z@github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1;timelinev1\xa2\x02\x03MTX\xaa\x02\x12Murmur.Timeline.V1\xca\x02\x12Murmur\\Timeline\\V1\xe2\x02\x1eMurmur\\Timeline\\V1\\GPBMetadata\xea\x02\x14Murmur::Timeline::V1b\x06proto3"

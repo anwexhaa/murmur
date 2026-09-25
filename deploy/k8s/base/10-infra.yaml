@@ -1,0 +1,161 @@
+# Postgres, Redis and NATS, as single replicas with local storage.
+#
+# These are here so the cluster is self-contained and the chaos experiments
+# have something to sever. A real deployment points the ConfigMap at a managed
+# Postgres, a Redis cluster and a NATS supercluster; none of the application
+# manifests change, because none of them know the difference between a
+# hostname that resolves inside the cluster and one that does not.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: murmur
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: murmur
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: murmur }
+            - { name: POSTGRES_PASSWORD, value: murmur }
+            - { name: POSTGRES_DB, value: murmur }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "murmur", "-d", "murmur"] }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 4Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: murmur
+spec:
+  selector: { app: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: murmur
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          # allkeys-lru is the honest policy here: everything Redis holds is
+          # derived from Postgres, so evicting the cold tail costs latency and
+          # never correctness.
+          #
+          # appendonly is not about durability in the usual sense -- none of
+          # this is authoritative -- it is about how a restart *ends*. A
+          # chaos run in phase 8 removed Redis and brought it back empty:
+          # every read then succeeded and returned nothing, because an
+          # instance that is up and cold is indistinguishable from a user
+          # whose timeline is genuinely empty. Persistence turns "everyone's
+          # feed is blank until a backfill runs" into "a restart resumes".
+          args:
+            - redis-server
+            - --appendonly
+            - "yes"
+            - --maxmemory
+            - 512mb
+            - --maxmemory-policy
+            - allkeys-lru
+          ports: [{ containerPort: 6379 }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 640Mi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 4Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: murmur
+spec:
+  selector: { app: nats }
+  ports:
+    - { name: client, port: 4222, targetPort: 4222 }
+    - { name: monitor, port: 8222, targetPort: 8222 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: murmur
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels: { app: nats }
+  template:
+    metadata:
+      labels: { app: nats }
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          # File storage, not memory. The outbox guarantees a committed post
+          # reaches the stream; the stream is what guarantees it reaches the
+          # worker, and a memory-backed stream would drop that on a restart.
+          args: ["-js", "-sd", "/data", "-m", "8222"]
+          ports:
+            - { containerPort: 4222 }
+            - { containerPort: 8222 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8222 }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 4Gi } }

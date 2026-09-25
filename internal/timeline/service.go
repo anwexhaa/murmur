@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,18 +32,30 @@ const (
 type Service struct {
 	timelinev1.UnimplementedTimelineServiceServer
 
-	store  *Store
-	social socialv1.SocialServiceClient
-	heavy  *HeavySet
-	cache  *PostCache
-	log    *slog.Logger
+	store   *Store
+	social  socialv1.SocialServiceClient
+	heavy   *HeavySet
+	cache   *PostCache
+	log     *slog.Logger
+	metrics *ReadPathMetrics
+	breaker *breaker
 }
 
 // NewService wires a service. A nil heavy set disables the pull side; a nil
 // cache hydrates straight from the social service, which is the phase 4
 // behaviour and the baseline the cache is measured against.
 func NewService(store *Store, social socialv1.SocialServiceClient, heavy *HeavySet, cache *PostCache, log *slog.Logger) *Service {
-	return &Service{store: store, social: social, heavy: heavy, cache: cache, log: log}
+	return &Service{
+		store: store, social: social, heavy: heavy, cache: cache, log: log,
+		breaker: newBreaker(nil),
+	}
+}
+
+// WithMetrics attaches the read-path instruments. Separate from NewService so
+// the five existing call sites do not all have to learn about a registry.
+func (s *Service) WithMetrics(metrics *ReadPathMetrics) *Service {
+	s.metrics = metrics
+	return s
 }
 
 // hydrate turns post IDs into posts, through the cache when there is one.
@@ -156,12 +169,59 @@ func (s *Service) GetTimeline(ctx context.Context, req *timelinev1.GetTimelineRe
 	}
 
 	limit := clampPageSize(req.GetPageSize())
+	started := time.Now()
+
+	// While the circuit is open, skip Redis entirely rather than paying a
+	// dial timeout to rediscover an outage this service already knows about.
+	if !s.breaker.allow() {
+		posts, token, sourceErr := s.fromSource(ctx, userID.String(), req.GetPageToken(), limit)
+		if sourceErr != nil {
+			return nil, toStatus(sourceErr)
+		}
+		s.observe(PathSourceFast, started)
+		return &timelinev1.GetTimelineResponse{
+			Posts:         posts,
+			NextPageToken: token,
+			IdsRead:       int32(len(posts)),
+			Degraded:      true,
+		}, nil
+	}
 
 	ids, err := s.assemble(ctx, userID.String(), req.GetPageToken(), limit)
 	if err != nil {
-		s.log.Error("reading timeline", "user_id", userID, "error", err)
-		return nil, status.Error(codes.Internal, "could not read the timeline")
+		s.breaker.fail()
+
+		if !shouldFallBack(ctx, err) {
+			return nil, toStatus(err)
+		}
+
+		// The derived view is gone; the data it derives from is not.
+		s.log.Warn("materialised timeline unavailable; reading from the source",
+			"user_id", userID, "error", err)
+		s.setDegraded(true)
+
+		posts, token, sourceErr := s.fromSource(ctx, userID.String(), req.GetPageToken(), limit)
+		if sourceErr != nil {
+			// Both paths failed, so this really is an outage rather than a
+			// degradation, and it is worth an error-level line naming both.
+			s.log.Error("both read paths failed",
+				"user_id", userID, "materialised_error", err, "source_error", sourceErr)
+			return nil, status.Error(codes.Internal, "could not read the timeline")
+		}
+
+		s.observe(PathSource, started)
+		return &timelinev1.GetTimelineResponse{
+			Posts:         posts,
+			NextPageToken: token,
+			IdsRead:       int32(len(posts)),
+			Degraded:      true,
+		}, nil
 	}
+
+	s.breaker.succeed()
+	s.setDegraded(false)
+	s.observe(PathMaterialised, started)
+
 	if len(ids) == 0 {
 		return &timelinev1.GetTimelineResponse{}, nil
 	}

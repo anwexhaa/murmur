@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	socialv1 "github.com/anwexhaa/murmur/api/gen/murmur/social/v1"
 	timelinev1 "github.com/anwexhaa/murmur/api/gen/murmur/timeline/v1"
@@ -124,10 +126,28 @@ func run() error {
 		heavy,
 		cache,
 		log,
-	)
+	).WithMetrics(timeline.NewReadPathMetrics(registry))
 
+	// Redis is deliberately absent from readiness.
+	//
+	// A readiness probe answers "should this pod receive traffic", and from
+	// phase 8 this service serves timelines out of Postgres when Redis is
+	// gone. Failing readiness on a dependency the service can now survive
+	// would take every replica out of rotation during exactly the incident
+	// the fallback was built for -- converting a degradation into the outage
+	// it exists to prevent.
 	checks := health.New(2 * time.Second)
-	checks.Register("redis", func(ctx context.Context) error { return redis.Ping(ctx).Err() })
+	checks.Register("social", func(ctx context.Context) error {
+		_, err := socialClient.GetFollowerCount(ctx, &socialv1.GetFollowerCountRequest{
+			UserId: "00000000-0000-0000-0000-000000000000",
+		})
+		// NotFound is a healthy answer: the call completed and the service
+		// answered. Only a transport failure means this pod cannot serve.
+		if status.Code(err) == codes.NotFound || err == nil {
+			return nil
+		}
+		return err
+	})
 	checks.Register("nats", events.Healthy)
 
 	mux := http.NewServeMux()

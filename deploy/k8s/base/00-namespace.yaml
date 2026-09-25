@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: murmur
+  labels:
+    app.kubernetes.io/part-of: murmur
+---
+# Settings every service reads. Anything secret lives in the Secret below;
+# this is the part that is safe in a git history and useful in a diff.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: murmur-config
+  namespace: murmur
+data:
+  MURMUR_ENV: "production"
+  LOG_FORMAT: "json"
+
+  POSTGRES_DSN: "postgres://murmur:murmur@postgres:5432/murmur?sslmode=disable"
+  REDIS_ADDR: "redis:6379"
+  NATS_URL: "nats://nats:4222"
+  SOCIAL_ADDR: "social-svc:9081"
+  TIMELINE_ADDR: "timeline-svc:9082"
+
+  # The threshold ADR-001 measured. Here rather than compiled in, because the
+  # right value depends on the shape of the graph and the graph is not a
+  # property of the code.
+  FANOUT_THRESHOLD: "10000"
+
+  # Longer than the slowest plausible fanout at that threshold, so JetStream
+  # does not redeliver work that is still in progress.
+  FANOUT_ACK_WAIT: "60s"
+
+  # Phase 7. Introspection stays off in production; MURMUR_ENV above already
+  # makes that the default, and stating it means a reader does not have to
+  # know that.
+  GRAPHQL_INTROSPECTION: "false"
+  RATE_LIMIT: "true"
+  QUERY_COMPLEXITY_LIMIT: "2000"
+
+  # Longer than the 30-second termination grace period below, so a pod that is
+  # draining never has a request time out *because* it is draining.
+  REQUEST_TIMEOUT: "15s"
+  SHUTDOWN_TIMEOUT: "25s"
+---
+# The development signing key, and it is only safe here because this overlay
+# deploys to a throwaway local cluster.
+#
+# A real deployment takes this from a secret store -- External Secrets, Vault,
+# a cloud provider's CSI driver -- and gives the verify-only service
+# AUTH_VERIFYING_KEY instead of the private half. It is a Secret rather than a
+# ConfigMap even locally, so that the shape of the manifest is the shape the
+# real one has and switching source does not rearrange anything.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: murmur-secrets
+  namespace: murmur
+type: Opaque
+stringData:
+  AUTH_SIGNING_KEY: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
